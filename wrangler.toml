@@ -1,0 +1,16 @@
+name = "wellbeing"
+main = "worker/index.js"
+compatibility_date = "2026-04-23"
+account_id = "a6574a97fa2af626488c61e14a73c8fe"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[observability]
+enabled = true
+
+[vars]
+APP_NAME = "Al Hikmah Student Wellbeing"
+ALLOWED_GOOGLE_DOMAIN = "alhikmahschool.org"
+BOOTSTRAP_EMAIL = "ali.rahman@alhikmahschool.org"

@@ -2,18 +2,16 @@
 
 ## Environments
 
-- Apps Script web app
-- Node API host
+- Cloudflare Worker
 - Neon PostgreSQL
 
 ## Secrets
 
-- Apps Script script properties for API base URL, API token, signing secret, and domain settings cache if needed
-- Backend environment variables for Neon connection and request verification
+- Cloudflare Worker secret for `DATABASE_URL`
+- future auth secrets for Google OIDC or Cloudflare Access integration
 
 ## Deployment Expectations
 
-- Apps Script deployed to the intended Google Workspace audience
-- Backend hosted behind HTTPS
+- Worker deployed to the intended Cloudflare account and Worker name
 - Neon accessed using TLS, preferably with `sslmode=verify-full`
 - migrations applied before first production use

@@ -11,6 +11,8 @@
 - Built backend APIs for bootstrap, dashboard, students, profile data, concerns, meetings, settings, and audit logs
 - Built Apps Script UI pages for dashboard, student directory, student profile, concerns, meetings, settings, and audit
 - Reworked the UI visual system to align with the later-added `design/lightTheme` reference and its "Alabaster Terminal" language
+- Migrated the runtime away from Apps Script and Express into a single Cloudflare Worker plus static asset deployment
+- Removed the obsolete Apps Script and Express runtime code after the Worker structure was created
 
 ## Major Decisions
 
@@ -20,6 +22,7 @@
 - Keep the fixed `admin` role immutable and seed additional operational roles for realistic usage
 - Redact cross-team records according to visibility level instead of simply hiding all non-owned records
 - Prefer the light theme reference over the dark one for this product because the school wellbeing context benefits from calm warmth over command-deck severity
+- Move to Cloudflare Worker because the product benefits from a single real application URL and a cleaner deployment/runtime model than Apps Script
 
 ## Security-Relevant Notes
 
@@ -27,6 +30,7 @@
 - Authorisation remains deny-by-default
 - Profile access and settings mutations now write audit events
 - Verified live migrations against Neon and smoke-tested signed `/api/bootstrap` and `/api/students` requests locally
+- Confirmed Cloudflare account selection and targeted the existing `wellbeing` Worker under `ali.rahman@alhikmahschool.org`
 
 ## Assumptions
 
@@ -35,5 +39,5 @@
 ## Unfinished Items
 
 - Dedicated UI modules for notes, actions, chronology exports, and reports
-- GIS token verification and stronger SSO hardening
+- Google OIDC or Cloudflare Access-backed auth in the Worker to replace the bootstrap access path
 - Production deployment pipeline and automated tests

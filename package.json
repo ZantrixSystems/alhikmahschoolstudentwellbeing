@@ -1,18 +1,19 @@
 {
   "name": "alhikmahschoolwellbeing",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Apps Script companion API for Neon-backed wellbeing data",
-  "main": "src/server.js",
+  "description": "Cloudflare Worker wellbeing platform backed by Neon PostgreSQL",
+  "type": "module",
   "scripts": {
-    "dev": "node --env-file=.env.local src/server.js",
-    "start": "node src/server.js",
-    "migrate": "node --env-file=.env.local src/migrate.js"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "node --env-file=.env.local scripts/migrate.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
-    "express": "^4.21.2",
     "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.74.0"
   }
 }
-

@@ -2,25 +2,25 @@
 
 ## Runtime Shape
 
-- Google Apps Script hosts the web UI through `HtmlService`
-- Apps Script acts as a trusted middle tier for authenticated school users
-- A Node/Express API provides application logic and database access
+- Cloudflare Worker hosts both the frontend and the API
+- Static assets are served by the Worker deployment
+- Worker code handles authentication, authorisation, filtering, visibility, and audit-aware data access
 - Neon PostgreSQL is the system of record
 
 ## Security Boundary
 
 - Browser never receives database credentials
 - Browser never talks directly to Neon
-- Apps Script signs backend requests with a shared HMAC secret and includes the active user identity asserted from Google Workspace context
-- Backend maps asserted identity to an internal active user record before authorising anything
+- Worker talks to Neon over HTTPS using a server-side secret
+- Internal user resolution and permissions happen server-side in Worker logic before protected data is returned
 
 ## Major Layers
 
-- Apps Script UI shell, templates, and proxy functions
-- Backend routes for domain APIs
-- Backend services for auth, filtering, visibility, and audit logging
+- Worker fetch handler
+- Worker API services for auth, filtering, visibility, and audit logging
+- Static frontend assets
 - SQL migrations and seed data
 
 ## Interim Rationale
 
-Apps Script provides rapid secure internal deployment within a school Google Workspace environment. The Node/Neon layer preserves a migration path toward a fuller platform because data access, rules, and schema are kept outside Apps Script.
+Cloudflare Worker provides a cleaner single-runtime deployment model than Apps Script while still preserving the schema, visibility model, and migration path toward a fuller MIS platform.
