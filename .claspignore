@@ -1,0 +1,9 @@
+node_modules/**
+src/**
+migrations/**
+.env
+.env.local
+.gitignore
+package.json
+package-lock.json
+
