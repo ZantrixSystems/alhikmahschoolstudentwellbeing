@@ -16,6 +16,7 @@ Create `.env.local` from `.env.example`.
 DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=verify-full
 API_PORT=3000
 APPS_SCRIPT_API_TOKEN=replace-with-a-long-random-secret
+APPS_SCRIPT_SIGNING_SECRET=replace-with-a-second-long-random-secret
 ```
 
 `DATABASE_URL` is how the backend authenticates to Neon. Prefer `sslmode=verify-full`.
@@ -32,10 +33,12 @@ npm install
 npm run migrate
 ```
 
-This creates:
+This creates the wellbeing beta schema, including:
 
-- `students`
-- `wellbeing_entries`
+- auth and permission tables
+- team visibility tables
+- students, radar, concerns, meetings, actions, chronology, audit, and saved filters
+- reference and sample seed data
 - `schema_migrations`
 
 ## 4. Start the API
@@ -56,20 +59,20 @@ Set these script properties in Apps Script:
 
 - `API_BASE_URL`
 - `API_TOKEN`
+- `API_SIGNING_SECRET`
 
 Example values:
 
 - `API_BASE_URL=https://your-api-hostname`
 - `API_TOKEN=` the same value as `APPS_SCRIPT_API_TOKEN` in the backend environment
+- `API_SIGNING_SECRET=` the same value as `APPS_SCRIPT_SIGNING_SECRET` in the backend environment
 
-Once set, Apps Script can use:
-
-- `listStudents()`
-- `createWellbeingEntry(studentId, score, notes)`
+Once set, Apps Script hosts the internal app shell and proxies signed requests to the API.
 
 ## Security notes
 
 - `.claspignore` prevents backend files from being pushed to Apps Script.
 - `.gitignore` prevents local secrets from being committed.
 - Apps Script never sees the Neon database password.
+- Apps Script signs each backend request using HMAC and includes the active Workspace user email for internal authorisation.
 - Neon traffic is encrypted with TLS through the connection string.

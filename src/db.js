@@ -13,6 +13,11 @@ async function query(text, params = []) {
   return pool.query(text, params);
 }
 
+async function queryOne(text, params = []) {
+  const result = await pool.query(text, params);
+  return result.rows[0] || null;
+}
+
 async function withClient(callback) {
   const client = await pool.connect();
   try {
@@ -25,5 +30,6 @@ async function withClient(callback) {
 module.exports = {
   pool,
   query,
+  queryOne,
   withClient,
 };
