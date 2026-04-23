@@ -1,9 +1,9 @@
 node_modules/**
 src/**
 migrations/**
+design/**
 .env
 .env.local
 .gitignore
 package.json
 package-lock.json
-

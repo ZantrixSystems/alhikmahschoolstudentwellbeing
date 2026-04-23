@@ -112,6 +112,18 @@
     setPageTitle('Dashboard');
     const target = document.getElementById('dashboardPage');
     target.innerHTML = `
+      <section class="dashboard-hero">
+        <article class="hero-primary">
+          <p class="eyebrow">Operational Status</p>
+          <h3>Student Wellbeing Overview</h3>
+          <p class="muted">A calmer operating surface for teams carrying sensitive casework. The profile, queue, and chronology views are all designed to reduce noise and sharpen decision speed.</p>
+        </article>
+        <article class="hero-aside">
+          <p class="eyebrow">Structured Filtering</p>
+          <h4>Bookmarkable working views</h4>
+          <p>Filter language stays consistent across directory, concerns, meetings, chronology, and saved views.</p>
+        </article>
+      </section>
       <section class="grid-cards" id="headlineCards"></section>
       <section class="two-col">
         <div class="panel">
@@ -143,17 +155,20 @@
     callServer({ path: '/api/dashboard', method: 'get' }).then((data) => {
       const headline = data.headline || {};
       document.getElementById('headlineCards').innerHTML = [
-        ['Students', headline.student_count || 0],
-        ['Open Concerns', headline.open_concern_count || 0],
-        ['Active Radar', headline.active_radar_count || 0],
-        ['Open Actions', headline.open_action_count || 0],
+        ['Students', headline.student_count || 0, 'Directory coverage across the interim wellbeing estate.'],
+        ['Open Concerns', headline.open_concern_count || 0, 'Items still in active review, triage, or escalation.'],
+        ['Active Radar', headline.active_radar_count || 0, 'Current team involvement visible from the student profile.'],
+        ['Open Actions', headline.open_action_count || 0, 'Interventions and support actions still underway.'],
       ]
         .map(
-          ([label, value]) => `
-            <article class="card">
+          ([label, value, note], index) => `
+            <article class="card ${index === 0 ? 'headline-card' : 'metric-card'}">
               <p class="eyebrow">${escapeHtml(label)}</p>
               <div class="card-number">${escapeHtml(value)}</div>
-              <p class="muted">Live from the protected wellbeing datastore.</p>
+              <div class="metric-foot">
+                <span class="metric-dot"></span>
+                <span>${escapeHtml(note)}</span>
+              </div>
             </article>`
         )
         .join('');
@@ -395,6 +410,7 @@
                     <header><h4>${escapeHtml(item.title)}</h4><span class="badge blue">${escapeHtml(item.interaction_type)}</span></header>
                     <p>${escapeHtml(item.summary || 'Protected')}</p>
                   </article>`).join('')}
+                ${!(data.concerns || []).length && !(data.meetings || []).length ? '<p class="muted">No visible concerns or meetings in this profile view.</p>' : ''}
               </div>
             </article>
           </div>

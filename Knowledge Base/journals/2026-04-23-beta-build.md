@@ -10,6 +10,7 @@
 - Built signed Apps Script to backend request verification
 - Built backend APIs for bootstrap, dashboard, students, profile data, concerns, meetings, settings, and audit logs
 - Built Apps Script UI pages for dashboard, student directory, student profile, concerns, meetings, settings, and audit
+- Reworked the UI visual system to align with the later-added `design/lightTheme` reference and its "Alabaster Terminal" language
 
 ## Major Decisions
 
@@ -18,6 +19,7 @@
 - Standardise filtering around an RSQL/FIQL-inspired grammar
 - Keep the fixed `admin` role immutable and seed additional operational roles for realistic usage
 - Redact cross-team records according to visibility level instead of simply hiding all non-owned records
+- Prefer the light theme reference over the dark one for this product because the school wellbeing context benefits from calm warmth over command-deck severity
 
 ## Security-Relevant Notes
 
