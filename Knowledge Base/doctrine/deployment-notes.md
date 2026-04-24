@@ -2,8 +2,7 @@
 
 ## Environments
 
-- Google Apps Script web app for the staff-facing UI.
-- Cloudflare Worker for the private API layer.
+- Google Apps Script web app for the staff-facing UI and backend functions.
 - Neon PostgreSQL for persistence.
 
 ## Apps Script
@@ -13,33 +12,19 @@
 - Access: domain restricted.
 - Execute as: deploying user.
 
-Required script properties:
+Required script property:
 
-- `API_BASE_URL`
-- `API_TOKEN`
-- `API_SIGNING_SECRET`
-
-## Worker
-
-- Worker name: `wellbeing`
-- Account: `Ali.rahman@alhikmahschool.org`
-
-Required Worker secrets:
-
-- `DATABASE_URL`
-- `APPS_SCRIPT_API_TOKEN`
-- `APPS_SCRIPT_SIGNING_SECRET`
+- `NEON_DATABASE_URL`
 
 ## Deployment Order
 
 1. Apply Neon migrations.
-2. Deploy the Worker API.
-3. Push Apps Script files with `clasp`.
-4. Redeploy the existing Apps Script web app deployment.
+2. Push Apps Script files with `clasp`.
+3. Redeploy the existing Apps Script web app deployment.
 
 ## Security Notes
 
-- Do not put Neon credentials into Apps Script.
-- Keep Apps Script-to-Worker calls signed.
+- Keep `NEON_DATABASE_URL` out of Git.
+- Prefer a reduced-privilege Neon role for the Apps Script runtime.
 - Keep Apps Script access domain restricted.
-- Audit changes to script properties and Worker secrets as security-relevant changes.
+- Audit script property changes as security-relevant changes.

@@ -1,14 +1,12 @@
 {
   "name": "alhikmahschoolwellbeing",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
-  "description": "Apps Script hosted wellbeing platform with Cloudflare Worker API and Neon PostgreSQL",
+  "description": "Apps Script hosted wellbeing platform backed by Neon PostgreSQL",
   "type": "module",
   "scripts": {
-    "worker:dev": "wrangler dev",
-    "worker:deploy": "wrangler deploy",
     "apps:push": "clasp push",
-    "apps:deploy": "clasp redeploy AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA --description \"Wellbeing Apps Script host\"",
+    "apps:deploy": "clasp redeploy AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA --description \"Apps Script direct Neon host\"",
     "migrate": "node --env-file=.env.local scripts/migrate.js"
   },
   "dependencies": {
@@ -16,7 +14,6 @@
     "pg": "^8.16.3"
   },
   "devDependencies": {
-    "@google/clasp": "^3.3.0",
-    "wrangler": "^4.74.0"
+    "@google/clasp": "^3.3.0"
   }
 }

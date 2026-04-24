@@ -51,3 +51,13 @@
 - Redeployed the existing Apps Script web app deployment as version 11
 - Updated doctrine and handover docs to describe the hybrid Apps Script plus Worker architecture
 - Follow-up: remove the Worker bootstrap fallback after signed Apps Script traffic has been observed working for all intended users
+
+## 2026-04-24 Worker Removal Preparation
+
+- Moved the wellbeing API layer directly into Apps Script server functions so the Worker project can be deleted
+- Added direct Neon HTTPS SQL access from Apps Script using `NEON_DATABASE_URL`
+- Preserved server-side user resolution, RBAC, team visibility redaction, audit logging, and structured filtering in Apps Script
+- Set Apps Script script properties to keep only `NEON_DATABASE_URL`
+- Redeployed the existing Apps Script web app deployment as version 13
+- Removed Worker runtime files and Wrangler commands from the repo
+- Follow-up: create a reduced-privilege Neon runtime role for Apps Script and rotate the database URL once confirmed

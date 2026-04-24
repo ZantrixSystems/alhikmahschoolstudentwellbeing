@@ -1,21 +1,19 @@
 # alhikmahschoolstudentwellbeing
 
-This repository is back to an Apps Script hosted app with a private Worker API layer backed by Neon PostgreSQL.
+This repository now runs as a Google Apps Script web app backed directly by Neon PostgreSQL.
 
 ## Runtime
 
-- Google Apps Script hosts the user-facing web app.
-- Cloudflare Worker handles `/api/*` requests and talks to Neon.
+- Google Apps Script hosts the staff-facing web app.
+- Apps Script server functions enforce authentication, RBAC, team visibility, filtering, and audit logging.
+- Apps Script calls Neon's HTTPS SQL endpoint with parameterised queries.
 - Neon PostgreSQL remains the system of record.
-- Local Node is used for migrations and deployment tooling.
-
-This keeps staff on the school-controlled Apps Script URL while keeping Neon credentials out of Apps Script.
+- Local Node is used only for migrations and Apps Script deployment tooling.
 
 ## Key IDs
 
 - Apps Script project ID: `19EBgbNt3I_SEYaYEqr1NQEPtnvHlHH5QO3PsdgGlp2997nHoAmWgHOix`
 - Apps Script deployment ID: `AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA`
-- Worker name: `wellbeing`
 
 ## Setup
 
@@ -43,31 +41,20 @@ Redeploy the Apps Script web app:
 npm run apps:deploy
 ```
 
-Deploy the Worker API:
-
-```bash
-npm run worker:deploy
-```
-
 ## Secrets
 
 Apps Script script properties:
 
-- `API_BASE_URL`
-- `API_TOKEN`
-- `API_SIGNING_SECRET`
+- `NEON_DATABASE_URL`
 
-Worker secrets:
+Local development secrets:
 
-- `DATABASE_URL`
-- `APPS_SCRIPT_API_TOKEN`
-- `APPS_SCRIPT_SIGNING_SECRET`
-
-`API_TOKEN` must match `APPS_SCRIPT_API_TOKEN`. `API_SIGNING_SECRET` must match `APPS_SCRIPT_SIGNING_SECRET`.
+- `.env.local` contains `DATABASE_URL` for migrations.
 
 ## Security Notes
 
-- Apps Script never stores the Neon database password.
-- Apps Script signs API requests with HMAC before calling the Worker.
-- The Worker resolves the signed Workspace email to the internal user record and enforces RBAC and team visibility server-side.
-- `.claspignore` keeps Worker code, migrations, docs, local secrets, and dependencies out of the Apps Script project.
+- Client-side code never receives database credentials.
+- Apps Script server functions are the data access boundary.
+- SQL is parameterised; structured filters compile only through allowlisted fields and operators.
+- Role permissions and team visibility are enforced server-side.
+- `.claspignore` keeps migrations, docs, dependencies, and local secrets out of the Apps Script project.
