@@ -31,6 +31,37 @@ async function hmacHex(secret, value) {
     .join("");
 }
 
+async function readAppsScriptEmail(request, env) {
+  const apiToken = env.APPS_SCRIPT_API_TOKEN;
+  const signingSecret = env.APPS_SCRIPT_SIGNING_SECRET;
+  if (!apiToken || !signingSecret) return null;
+
+  const providedToken = request.headers.get("x-api-token");
+  const timestamp = request.headers.get("x-request-timestamp");
+  const signature = request.headers.get("x-request-signature");
+  const email = (request.headers.get("x-app-user-email") ?? "").trim().toLowerCase();
+  if (!providedToken || !timestamp || !signature || !email) return null;
+  if (providedToken !== apiToken) return null;
+
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber)) return null;
+  if (Math.abs(Date.now() - timestampNumber) > 5 * 60 * 1000) return null;
+
+  const url = new URL(request.url);
+  const bodyText = request.method === "GET" || request.method === "HEAD"
+    ? ""
+    : await request.clone().text();
+  const message = [
+    String(timestamp),
+    request.method.toUpperCase(),
+    url.pathname,
+    bodyText || "",
+  ].join("\n");
+  const expected = await hmacHex(signingSecret, message);
+
+  return expected === signature ? email : null;
+}
+
 async function readSessionEmail(request, env) {
   const cookies = parseCookies(request);
   const raw = cookies.wellbeing_session;
@@ -72,6 +103,7 @@ export function clearSessionCookie() {
 
 export async function loadAuthContext(request, env) {
   const email =
+    (await readAppsScriptEmail(request, env)) ||
     (await readSessionEmail(request, env)) ||
     env.BOOTSTRAP_EMAIL ||
     null;

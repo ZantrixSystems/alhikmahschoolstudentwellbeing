@@ -41,3 +41,13 @@
 - Dedicated UI modules for notes, actions, chronology exports, and reports
 - Google OIDC or Cloudflare Access-backed auth in the Worker to replace the bootstrap access path
 - Production deployment pipeline and automated tests
+
+## 2026-04-24 Apps Script Return
+
+- Restored Apps Script project files and `.clasp.json` for project `19EBgbNt3I_SEYaYEqr1NQEPtnvHlHH5QO3PsdgGlp2997nHoAmWgHOix`
+- Kept Cloudflare Worker as the private Neon API layer rather than putting Neon credentials into Apps Script
+- Added Worker verification for signed Apps Script headers: token, timestamp, HMAC signature, and Workspace email
+- Set matching Apps Script script properties and Worker secrets for the signed bridge
+- Redeployed the existing Apps Script web app deployment as version 11
+- Updated doctrine and handover docs to describe the hybrid Apps Script plus Worker architecture
+- Follow-up: remove the Worker bootstrap fallback after signed Apps Script traffic has been observed working for all intended users

@@ -2,25 +2,35 @@
 
 ## Runtime Shape
 
-- Cloudflare Worker hosts both the frontend and the API
-- Static assets are served by the Worker deployment
-- Worker code handles authentication, authorisation, filtering, visibility, and audit-aware data access
-- Neon PostgreSQL is the system of record
+- Google Apps Script hosts the staff-facing web app.
+- Cloudflare Worker hosts the private API layer.
+- Neon PostgreSQL is the system of record.
+- Local Node tooling is used for migrations and deployment commands.
+
+## Request Flow
+
+1. A staff user opens the Apps Script web app.
+2. Apps Script resolves the signed-in Workspace email with `Session.getActiveUser()`.
+3. Apps Script signs the API request with `API_SIGNING_SECRET`.
+4. The Worker verifies the token, timestamp, HMAC signature, and signed email.
+5. The Worker maps the email to the internal `users` table.
+6. The Worker enforces role permissions, team visibility, and record-level rules before querying Neon.
 
 ## Security Boundary
 
-- Browser never receives database credentials
-- Browser never talks directly to Neon
-- Worker talks to Neon over HTTPS using a server-side secret
-- Internal user resolution and permissions happen server-side in Worker logic before protected data is returned
+- Browser code never receives database credentials.
+- Apps Script never stores the Neon database password.
+- Apps Script-to-Worker requests are signed server-side.
+- Worker code owns all database access and permission enforcement.
+- UI hiding is treated as convenience only; the Worker remains the security boundary for data access.
 
 ## Major Layers
 
-- Worker fetch handler
-- Worker API services for auth, filtering, visibility, and audit logging
-- Static frontend assets
-- SQL migrations and seed data
+- Apps Script HtmlService shell and client UI.
+- Apps Script server functions that proxy signed API calls.
+- Worker API services for auth, filtering, visibility, and audit logging.
+- SQL migrations and seed data for Neon.
 
 ## Interim Rationale
 
-Cloudflare Worker provides a cleaner single-runtime deployment model than Apps Script while still preserving the schema, visibility model, and migration path toward a fuller MIS platform.
+This hybrid keeps the school-required Apps Script host while preserving a cleaner, safer Neon integration through the Worker. It avoids putting database credentials into Apps Script and keeps the future migration path open because the Worker API can later support a non-Apps-Script frontend.

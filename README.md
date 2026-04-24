@@ -1,20 +1,23 @@
 # alhikmahschoolstudentwellbeing
 
-This repository now runs as a single Cloudflare Worker application backed by Neon PostgreSQL.
+This repository is back to an Apps Script hosted app with a private Worker API layer backed by Neon PostgreSQL.
 
 ## Runtime
 
-- Cloudflare Worker serves the frontend and API routes
-- Neon PostgreSQL is the system of record
-- Local Node is only used for migrations
+- Google Apps Script hosts the user-facing web app.
+- Cloudflare Worker handles `/api/*` requests and talks to Neon.
+- Neon PostgreSQL remains the system of record.
+- Local Node is used for migrations and deployment tooling.
 
-## Local Setup
+This keeps staff on the school-controlled Apps Script URL while keeping Neon credentials out of Apps Script.
 
-Create `.env.local` from `.env.example`.
+## Key IDs
 
-```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=verify-full
-```
+- Apps Script project ID: `19EBgbNt3I_SEYaYEqr1NQEPtnvHlHH5QO3PsdgGlp2997nHoAmWgHOix`
+- Apps Script deployment ID: `AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA`
+- Worker name: `wellbeing`
+
+## Setup
 
 Install dependencies:
 
@@ -28,37 +31,43 @@ Run migrations:
 npm run migrate
 ```
 
-Start local development:
+Push Apps Script files:
 
 ```bash
-npm run dev
+npm run apps:push
 ```
 
-## Cloudflare Deployment
+Redeploy the Apps Script web app:
 
-This repo is configured for the existing Worker:
+```bash
+npm run apps:deploy
+```
 
-- Worker name: `wellbeing`
-- Cloudflare account: `Ali.rahman@alhikmahschool.org`
+Deploy the Worker API:
 
-Required Worker secret:
+```bash
+npm run worker:deploy
+```
+
+## Secrets
+
+Apps Script script properties:
+
+- `API_BASE_URL`
+- `API_TOKEN`
+- `API_SIGNING_SECRET`
+
+Worker secrets:
 
 - `DATABASE_URL`
+- `APPS_SCRIPT_API_TOKEN`
+- `APPS_SCRIPT_SIGNING_SECRET`
 
-Set it with Wrangler:
+`API_TOKEN` must match `APPS_SCRIPT_API_TOKEN`. `API_SIGNING_SECRET` must match `APPS_SCRIPT_SIGNING_SECRET`.
 
-```bash
-wrangler secret put DATABASE_URL
-```
+## Security Notes
 
-Then deploy:
-
-```bash
-npm run deploy
-```
-
-## Product Notes
-
-- Role-based access control and team visibility rules are enforced server-side in the Worker
-- Structured filtering uses the same RSQL/FIQL-inspired grammar across list routes
-- The current Worker deployment uses a bootstrap internal user for access while a fuller Google sign-in layer is being migrated in
+- Apps Script never stores the Neon database password.
+- Apps Script signs API requests with HMAC before calling the Worker.
+- The Worker resolves the signed Workspace email to the internal user record and enforces RBAC and team visibility server-side.
+- `.claspignore` keeps Worker code, migrations, docs, local secrets, and dependencies out of the Apps Script project.

@@ -1,0 +1,21 @@
+node_modules/**
+src/**
+worker/**
+public/**
+scripts/**
+migrations/**
+design/**
+.wrangler/**
+.env
+.env.local
+.env.example
+.gitignore
+.claspignore
+package.json
+package-lock.json
+wrangler.toml
+README.md
+HANDOVER.md
+AGENTS.md
+CLAUDE.md
+Knowledge Base/**

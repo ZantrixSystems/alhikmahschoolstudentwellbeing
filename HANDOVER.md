@@ -2,28 +2,29 @@
 
 ## What Works
 
-- Single Cloudflare Worker architecture replacing Apps Script and the separate Express API
-- Worker serves both static frontend assets and `/api/*` routes
-- Neon remains the system of record with the existing wellbeing schema and migrations
-- Student directory, profile, concerns, meetings, settings, and audit views are preserved in the new frontend
-- Role, permission, team visibility, and structured filtering logic are enforced in Worker code
+- Apps Script is restored as the school-facing web app host.
+- The existing Apps Script project and deployment ID are in use.
+- Apps Script script properties have been set for the Worker API bridge.
+- The Cloudflare Worker remains as the private Neon API layer.
+- Neon remains the system of record with the existing wellbeing schema and migrations.
+- Student directory, profile, concerns, meetings, settings, audit, RBAC, team visibility, and structured filtering are preserved.
 
-## What Was Removed
+## Current Architecture
 
-- Apps Script runtime files
-- Apps Script deployment config
-- Express API routes and middleware
-- temporary local Neon/App Script bridge files
+- Staff open the Apps Script web app.
+- Apps Script obtains the signed-in Workspace email.
+- Apps Script signs API requests and calls the Worker.
+- The Worker verifies the request, loads the internal app user, and applies server-side permissions before querying Neon.
 
 ## Current Assumptions
 
-- Deployment target is the existing Cloudflare Worker `wellbeing`
-- Cloudflare account is `ali.rahman@alhikmahschool.org`
-- Worker secret `DATABASE_URL` will be set in Cloudflare
-- Current login path uses a bootstrap Worker email for controlled internal access until fuller Google auth is added to the Worker
+- School-facing deployment remains Google Apps Script.
+- The Worker URL is treated as an internal API endpoint rather than the user-facing app URL.
+- The authorised admin user is `ali.rahman@alhikmahschool.org`.
+- Apps Script web app access is restricted to the school domain.
 
 ## Incomplete Or Next
 
-- Replace bootstrap auth with Google OIDC or Cloudflare Access-backed identity
-- Expand actions, notes, reports, and exports into dedicated screens
-- Add automated tests and a cleaner local seed/bootstrap workflow
+- Add automated regression tests around Worker API permissions and filtering.
+- Replace the temporary Worker bootstrap fallback with a stricter signed-request-only mode once all access paths are confirmed.
+- Continue polishing the Apps Script UI now that the deployment path is stable.
