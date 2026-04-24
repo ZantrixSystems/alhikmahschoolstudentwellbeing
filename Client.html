@@ -4,6 +4,7 @@
     route: {},
     activeProfileAction: '',
     profileData: null,
+    profileSaving: false,
   };
 
   function setStatus(text) {
@@ -472,20 +473,31 @@
   }
 
   function postProfile(path, payload) {
+    if (state.profileSaving) return;
+    state.profileSaving = true;
+    Array.from(document.querySelectorAll('[data-profile-action], #profileActionHost .button')).forEach((button) => {
+      button.disabled = true;
+    });
     callServer({ path, method: 'post', payload }).then(() => {
       showMessage('Profile updated.');
       state.activeProfileAction = '';
       renderStudentProfilePage();
+    }).finally(() => {
+      state.profileSaving = false;
     });
   }
 
   function buildTimeline(data) {
+    const chronologyRefs = new Set((data.chronology || [])
+      .map((item) => item.source_table && item.source_id ? item.source_table + ':' + item.source_id : '')
+      .filter(Boolean));
+    const includeEntity = (table, item) => !chronologyRefs.has(table + ':' + item.id);
     const items = []
       .concat((data.chronology || []).map((item) => ({ ...item, source: item.event_type || 'event' })))
-      .concat((data.notes || []).map((item) => ({ ...item, source: 'note_added' })))
-      .concat((data.meetings || []).map((item) => ({ ...item, source: 'meeting_logged' })))
-      .concat((data.concerns || []).map((item) => ({ ...item, source: 'concern_logged' })))
-      .concat((data.actions || []).map((item) => ({ ...item, source: 'follow_up_created' })))
+      .concat((data.notes || []).filter((item) => includeEntity('notes', item)).map((item) => ({ ...item, source: 'note_added' })))
+      .concat((data.meetings || []).filter((item) => includeEntity('meetings', item)).map((item) => ({ ...item, source: 'meeting_logged' })))
+      .concat((data.concerns || []).filter((item) => includeEntity('concerns', item)).map((item) => ({ ...item, source: 'concern_logged' })))
+      .concat((data.actions || []).filter((item) => includeEntity('actions', item)).map((item) => ({ ...item, source: 'follow_up_created' })))
       .sort((a, b) => new Date(b.occurred_at || b.created_at) - new Date(a.occurred_at || a.created_at));
     if (!items.length) return '<p class="muted">No visible timeline activity yet.</p>';
     return items.slice(0, 80).map((item) => `

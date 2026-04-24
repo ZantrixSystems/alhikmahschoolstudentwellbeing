@@ -17,6 +17,7 @@ function makeEnv(options = {}) {
   const profileRows = options.profileRows || [];
   const meetingRows = options.meetingRows || [];
   const calendarRows = options.calendarRows || [];
+  const chronologyRows = options.chronologyRows || [];
 
   const env = {
     WORKER_SHARED_SECRET: 'test-secret',
@@ -51,7 +52,7 @@ function makeEnv(options = {}) {
       }
       if (sql.includes('FROM student_team_radar str')) return [];
       if (sql.includes('FROM meetings m LEFT JOIN teams')) return meetingRows;
-      if (sql.includes('FROM chronology_events')) return [];
+      if (sql.includes('FROM chronology_events')) return chronologyRows;
       if (sql.includes('FROM concerns c')) return [];
       if (sql.includes('FROM actions a LEFT JOIN teams')) return [];
       if (sql.includes('FROM notes n')) return [];
@@ -155,6 +156,37 @@ test('calendar applies action visibility separately from meeting visibility', as
   assert.equal(data.meetings[0].visibility, 'indicator');
   assert.equal(data.meetings[0].redacted, true);
   assert.equal(data.meetings[0].item_status, 'open');
+});
+
+test('student profile chronology includes source references for timeline dedupe', async () => {
+  const api = createApi(makeEnv({
+    permissions: ['students.view', 'chronology.view', 'notes.view'],
+    profileRows: [{
+      id: STUDENT_ID,
+      student_code: 'A001',
+      first_name: 'Amina',
+      last_name: 'Khan',
+      flags: [],
+    }],
+    chronologyRows: [{
+      id: 'chronology-1',
+      source_table: 'notes',
+      source_id: 'note-1',
+      team_id: SOURCE_TEAM,
+      team_name: 'Pastoral',
+      title: 'Check-in',
+      summary: 'Settled well',
+      detail: 'Longer note',
+      event_type: 'note_added',
+      visibility_level: 'summary',
+      occurred_at: '2026-04-24T09:00:00Z',
+      created_at: '2026-04-24T09:00:00Z',
+    }],
+  }), 'worker.test@alhikmah.example.org');
+
+  const data = await api.dispatch({ path: `/api/students/${STUDENT_ID}`, method: 'get' });
+  assert.equal(data.chronology[0].source_table, 'notes');
+  assert.equal(data.chronology[0].source_id, 'note-1');
 });
 
 test('structured student filter compiles allowlisted fields to parameters', async () => {

@@ -56,3 +56,4 @@ On 2026-04-24 the Worker and Apps Script production deployment were deployed. `c
 - Changed Students filters to a Builder/Advanced mode pattern with active chips, clear filters, saved views, and an advanced filter input only when selected.
 - Slimmed Dashboard KPI tiles and replaced the dashboard filter examples panel with upcoming follow-ups visible to the signed-in user.
 - Kept Calendar and Settings compact with stable skeleton loading to reduce layout jump while data loads.
+- Fixed profile timeline duplication by carrying chronology source references and suppressing raw records already represented by chronology events.
