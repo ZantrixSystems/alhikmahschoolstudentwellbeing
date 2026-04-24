@@ -32,3 +32,5 @@
 ## Migration Direction
 
 The schema uses explicit relational tables so future MIS integration can reuse student and casework entities cleanly.
+
+Neon remains the system of record. Apps Script must not connect to Neon directly; all reads and writes go through the Worker API.

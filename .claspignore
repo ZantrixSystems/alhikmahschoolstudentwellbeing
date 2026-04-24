@@ -2,8 +2,10 @@ node_modules/**
 src/**
 scripts/**
 migrations/**
+worker/**
 design/**
 .wrangler/**
+wrangler.toml
 .env
 .env.local
 .env.example

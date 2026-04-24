@@ -1,20 +1,32 @@
-# Student Profile Design
+# Student Profile UX
 
 ## Product Principle
 
-The student profile is the single pane of glass for operational decision-making.
+The student profile is the operational centre of the interim app.
 
-## Layout Priorities
+## Layout
 
-- identity card first
-- active radar badges near the top
-- key flags and leads visible immediately
-- recent activity and chronology central
-- concerns, meetings, actions, and notes as clear modular panels
-- access-aware sections that either hide or redact detail
+- Compact header with student identity and active radar badges.
+- Top horizontal action bar for casework actions.
+- Inline action form opens below the action bar and collapses after submit.
+- Main centre/left area is the timeline.
+- Right side panel contains student details, radar metadata, first-added dates, status, lead, and metadata.
 
-## Redaction Behaviour
+## Actions
 
-- indicator-only access shows team involvement markers
-- summary access shows safe metadata and short summaries
-- full access shows detailed entries
+- Add note
+- Add meeting
+- Add concern
+- Add follow-up
+- Add radar
+- Update status
+
+## Timeline
+
+Timeline entries may represent notes, concerns, meetings, follow-ups, radar changes, status changes, and assignment changes. Entries must respect visibility:
+
+- indicator access shows that an event happened
+- summary access shows safe metadata and summaries
+- full access shows detailed content
+
+The Worker is responsible for redaction. The UI only renders what it receives.

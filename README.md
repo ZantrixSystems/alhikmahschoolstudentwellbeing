@@ -1,14 +1,14 @@
 # alhikmahschoolstudentwellbeing
 
-This repository now runs as a Google Apps Script web app backed directly by Neon PostgreSQL.
+Interim student wellbeing and casework platform.
 
 ## Runtime
 
-- Google Apps Script hosts the staff-facing web app.
-- Apps Script server functions enforce authentication, RBAC, team visibility, filtering, and audit logging.
-- Apps Script calls Neon's HTTPS SQL endpoint with parameterised queries.
+- Apps Script is the only staff-facing web app.
+- Apps Script handles the UI shell and Google Workspace identity.
+- Apps Script signs requests to a private Cloudflare Worker API.
+- The Worker enforces permissions, filtering, visibility, redaction, audit logging, and Neon access.
 - Neon PostgreSQL remains the system of record.
-- Local Node is used only for migrations and Apps Script deployment tooling.
 
 ## Key IDs
 
@@ -17,44 +17,49 @@ This repository now runs as a Google Apps Script web app backed directly by Neon
 
 ## Setup
 
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Run migrations:
-
-```bash
 npm run migrate
 ```
 
-Push Apps Script files:
+## Worker
+
+Set Worker secrets:
+
+```bash
+npm run worker:secret:database
+npm run worker:secret:bridge
+```
+
+Deploy:
+
+```bash
+npm run worker:deploy
+```
+
+Required Worker secrets:
+
+- `DATABASE_URL`
+- `WORKER_SHARED_SECRET`
+
+## Apps Script
+
+Required Apps Script script properties:
+
+- `WORKER_API_URL`
+- `WORKER_SHARED_SECRET`
+- `WORKER_KEY_ID` optional
+
+Deploy:
 
 ```bash
 npm run apps:push
-```
-
-Redeploy the Apps Script web app:
-
-```bash
 npm run apps:deploy
 ```
 
-## Secrets
-
-Apps Script script properties:
-
-- `NEON_DATABASE_URL`
-
-Local development secrets:
-
-- `.env.local` contains `DATABASE_URL` for migrations.
-
 ## Security Notes
 
-- Client-side code never receives database credentials.
-- Apps Script server functions are the data access boundary.
-- SQL is parameterised; structured filters compile only through allowlisted fields and operators.
-- Role permissions and team visibility are enforced server-side.
-- `.claspignore` keeps migrations, docs, dependencies, and local secrets out of the Apps Script project.
+- Do not put Neon credentials in Apps Script.
+- Do not expose the Worker URL as a user-facing app route.
+- SQL is parameterised and structured filters compile only through allowlisted fields.
+- Worker-side permissions and team visibility are authoritative.

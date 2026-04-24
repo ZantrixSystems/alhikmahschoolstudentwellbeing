@@ -1,17 +1,21 @@
-# Meeting Feed Design
+# Calendar And Follow-Ups
 
 ## Purpose
 
-Meetings and interactions are intentionally more shareable than detailed case notes, while still respecting team and confidentiality boundaries.
+Meetings and follow-ups are operational prompts, not just a feed. The beta app presents them as a compact calendar-style surface with a list fallback.
 
 ## Visible Fields By Default
 
 - date
+- student
 - team
 - interaction type
-- logged by
 - short summary where permitted
 
-## Protected Mode
+## Visibility
 
-Users with summary-only visibility can see that a meeting occurred without seeing sensitive detail.
+Users only see records permitted by role and team visibility. Summary-only visibility shows safe metadata without sensitive detail. Profile links always return to the student profile, where the same Worker redaction rules apply.
+
+## Interim Limitation
+
+The current calendar is intentionally lightweight. It groups visible dated records and avoids full scheduling complexity until the full MIS product has a stronger calendar model.

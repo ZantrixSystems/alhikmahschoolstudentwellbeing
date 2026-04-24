@@ -31,5 +31,6 @@ Rules are defined per source team, target team, and content type.
 
 ## Enforcement
 
-- Applied record-by-record in backend services
+- Applied record-by-record in Worker services
 - Redacted payloads are returned when summary-only access exists
+- Apps Script receives already-shaped records and must not attempt to expand visibility client-side

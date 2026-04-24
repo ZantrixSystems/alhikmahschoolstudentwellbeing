@@ -1,11 +1,14 @@
 # Agent Operating Notes
 
-This repository hosts an interim school student wellbeing platform built on Google Apps Script for the web UI and a Node/Neon backend for secure persistence.
+This repository hosts an interim school student wellbeing platform built on Google Apps Script for the staff-facing UI, a private Cloudflare Worker API, and Neon PostgreSQL for secure persistence.
 
 ## Delivery Rules
 
 - Preserve the split architecture unless there is a documented reason to change it.
+- Apps Script is the user-facing app. The Worker is private infrastructure only.
+- Do not expose Neon credentials in Apps Script.
 - Keep security boundaries server-side. Never rely on UI-only permission checks.
+- All sensitive permission, filtering, visibility, redaction, and audit decisions happen in the Worker.
 - Treat all student data as highly sensitive and default to least privilege.
 - Preserve the RSQL/FIQL-inspired structured filtering model across frontend and backend.
 - Prefer URL-driven state for lists, filters, and saved views.
@@ -21,6 +24,7 @@ This repository hosts an interim school student wellbeing platform built on Goog
 
 - Keep Apps Script files modular using HTML includes and small client modules.
 - Keep backend code organised by route, service, and shared library.
+- Keep the Apps Script UI compact, slick, and operationally dense.
 - Deny by default when a permission or visibility decision is ambiguous.
 - Redact detail rather than overexpose data where cross-team visibility is partial.
 - Preserve auditability: changes to permissions, visibility, and sensitive records should be journaled or logged.

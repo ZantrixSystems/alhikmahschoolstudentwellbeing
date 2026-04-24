@@ -2,30 +2,44 @@
 
 ## Current Approach
 
-- App is intended for deployment as an Apps Script web app in Google Workspace
-- Apps Script reads the active user email from the Google-hosted session
-- Requests to the backend include:
-  - API token
-  - HMAC signature
-  - request timestamp
-  - asserted user email
-- Backend validates signature and then resolves the internal user record
+- Staff authenticate by opening the Google Apps Script web app inside the school Workspace context.
+- Apps Script reads the active user email with `Session.getActiveUser()`.
+- Apps Script signs every Worker request with:
+  - key id
+  - timestamp
+  - nonce
+  - asserted Workspace email
+  - HMAC SHA-256 signature
+- The Worker verifies the signature before resolving the internal user record.
+
+## Signed Request Model
+
+The canonical string is:
+
+```text
+timestamp
+nonce
+workspace-email
+json-body
+```
+
+The Apps Script property `WORKER_SHARED_SECRET` and Worker secret `WORKER_SHARED_SECRET` must match. Requests older than five minutes are rejected.
 
 ## Domain Restriction
 
-- Allowed Google Workspace domains are stored in app settings
-- Domain checks happen server-side
-- Domain allowlisting is separate from app authorisation
+- Allowed Workspace domains are stored in `app_settings`.
+- Domain checks happen in the Worker.
+- Domain allowlisting is separate from internal app authorisation.
 
 ## App Authorisation
 
-- A user must exist in the internal `users` table
-- User must be active
-- User must have at least one applicable role for the requested action
+- A user must exist in `users`.
+- The user must be active.
+- The user must have an effective permission for the requested action.
+- The built-in `admin` role remains fixed and full access.
 
 ## Future Hardening
 
-- GIS token verification service
-- SSO policy enforcement
-- device and network context checks
-- stronger session rotation and anomaly detection
+- Add replay nonce storage if the threat model requires it.
+- Add Google ID token verification if Apps Script identity becomes insufficient.
+- Add device, network, and anomaly signals for a full MIS platform.

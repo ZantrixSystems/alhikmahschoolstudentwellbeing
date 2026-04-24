@@ -2,7 +2,14 @@
 
 ## Goal
 
-Provide a consistent, URL-driven filtering syntax across list screens and backend APIs without exposing SQL injection risk.
+Provide URL-driven filtering across list screens and backend APIs without exposing SQL injection risk.
+
+## UX Layers
+
+- Friendly filter builder for common staff workflows.
+- Advanced structured input for power users.
+
+The friendly builder writes the same structured filter string used by the backend.
 
 ## Style
 
@@ -16,6 +23,7 @@ The grammar is inspired by RSQL/FIQL.
 
 - `==` equals
 - `!=` not equals
+- `~=` contains text
 - `>=` greater than or equal
 - `<=` less than or equal
 - `>` greater than
@@ -24,32 +32,32 @@ The grammar is inspired by RSQL/FIQL.
 - `=out=` exclusion list
 - `=isnull=` true or false
 
-## Value Types
+## Student Filter Fields
 
-- strings
-- booleans: `true`, `false`
-- dates and timestamps in ISO-like format
-- null checks through `=isnull=`
+- `name`
+- `yearGroup`
+- `year`
+- `class`
+- `status`
+- `radar`
+- `radarTeam`
+- `lead`
+- `latestActivity`
+- `openFollowUp`
+- `hasOpenConcern`
 
 ## Examples
 
+- `radar==safeguarding`
 - `status==open`
-- `radarTeam==safeguarding;priority==high`
-- `yearGroup==Y8,(radarTeam==sendco,radarTeam==pastoral)`
-- `createdAt>=2026-01-01`
-- `assignedTo=in=(me,user123)`
-- `hasOpenConcern==true`
+- `name~=ahmed`
+- `yearGroup==Y8`
+- `latestActivity>=2026-01-01`
+- `radar=in=(safeguarding,pastoral)`
 
 ## Safety Rules
 
-- Only allowlisted fields may be filtered
-- Only allowlisted operators may be used
-- Parsed expressions compile to parameterised SQL fragments
-- No raw SQL assembly from user input
-
-## UX Pattern
-
-- URL query param `filter`
-- active filter chips
-- saved filters by area
-- backend echoes parsed filter summary for diagnostics
+- Only allowlisted fields may be filtered.
+- Only allowlisted operators may be used.
+- Parsed expressions compile to parameterised SQL fragments.
+- User input never becomes raw SQL identifiers or clauses.

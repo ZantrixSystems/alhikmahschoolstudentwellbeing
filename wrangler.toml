@@ -1,0 +1,7 @@
+name = "al-hikmah-wellbeing-api"
+main = "worker/index.js"
+compatibility_date = "2026-04-24"
+account_id = "a6574a97fa2af626488c61e14a73c8fe"
+
+[observability]
+enabled = true

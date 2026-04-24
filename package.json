@@ -2,18 +2,24 @@
   "name": "alhikmahschoolwellbeing",
   "version": "2.2.0",
   "private": true,
-  "description": "Apps Script hosted wellbeing platform backed by Neon PostgreSQL",
+  "description": "Apps Script hosted wellbeing platform backed by a Cloudflare Worker API and Neon PostgreSQL",
   "type": "module",
   "scripts": {
     "apps:push": "clasp push",
-    "apps:deploy": "clasp redeploy AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA --description \"Apps Script direct Neon host\"",
-    "migrate": "node --env-file=.env.local scripts/migrate.js"
+    "apps:deploy": "clasp redeploy AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA --description \"Apps Script hybrid Worker bridge\"",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:secret:database": "wrangler secret put DATABASE_URL",
+    "worker:secret:bridge": "wrangler secret put WORKER_SHARED_SECRET",
+    "migrate": "node --env-file=.env.local scripts/migrate.js",
+    "check": "node --check worker/index.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
     "pg": "^8.16.3"
   },
   "devDependencies": {
-    "@google/clasp": "^3.3.0"
+    "@google/clasp": "^3.3.0",
+    "wrangler": "^4.13.2"
   }
 }
