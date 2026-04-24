@@ -350,8 +350,10 @@
         <div class="form-grid">
           <input id="followTitle" placeholder="Follow-up title">
           <input id="followDueAt" type="date">
+          <select id="followStatus"><option value="open">Open</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
           <select id="followPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
           <select id="followTeam"><option value="">No team</option>${teams}</select>
+          <select id="followVisibility"><option value="summary">Summary</option><option value="indicator">Indicator</option><option value="full">Full</option></select>
           <textarea id="followSummary" class="span-2" rows="3" placeholder="What needs to happen?"></textarea>
           <button class="button span-2" id="submitFollow">Add follow-up</button>
         </div>`,
@@ -404,6 +406,8 @@
       title: document.getElementById('followTitle').value,
       summary: document.getElementById('followSummary').value,
       priority: document.getElementById('followPriority').value,
+      status: document.getElementById('followStatus').value,
+      visibilityLevel: document.getElementById('followVisibility').value,
       dueAt: document.getElementById('followDueAt').value,
       teamId: document.getElementById('followTeam').value,
     });
@@ -546,7 +550,7 @@
         </div>
         <div class="toolbar">
           <input id="meetingSearchPage" class="search-input" value="${escapeHtml(state.route.q)}" placeholder="Search meetings or students">
-          <input id="meetingFilterPage" class="filter-input" value="${escapeHtml(state.route.filter)}" placeholder="interactionType==review_meeting">
+          <input id="meetingFilterPage" class="filter-input" value="${escapeHtml(state.route.filter)}" placeholder="type==follow_up;status==open or interactionType==review_meeting">
           <button class="button" id="applyMeetingFilter">Apply</button>
         </div>
         <div class="chip-row">${renderFilterChips(state.route.filter)}</div>
@@ -567,7 +571,7 @@
       }
       const grouped = {};
       meetings.forEach((meeting) => {
-        const key = new Date(meeting.occurred_at).toISOString().slice(0, 10);
+        const key = new Date(meeting.calendar_at || meeting.occurred_at).toISOString().slice(0, 10);
         grouped[key] = grouped[key] || [];
         grouped[key].push(meeting);
       });
@@ -580,7 +584,7 @@
               ${grouped[day].map((meeting) => `
                 <button class="calendar-event" data-student-link="${meeting.student_id}">
                   <strong>${escapeHtml(meeting.title)}</strong>
-                  <span>${escapeHtml(meeting.first_name)} ${escapeHtml(meeting.last_name)}</span>
+                  <span>${escapeHtml(meeting.first_name)} ${escapeHtml(meeting.last_name)} | ${escapeHtml(meeting.item_status || meeting.interaction_type)}</span>
                 </button>`).join('')}
             </article>`).join('') || '<p class="muted">No visible calendar items.</p>'}
         </div>`;
@@ -594,12 +598,12 @@
         <header>
           <div>
             <h4>${escapeHtml(item.title)}</h4>
-            <p class="muted">${escapeHtml(item.first_name)} ${escapeHtml(item.last_name)} | ${escapeHtml(item.team_name || 'No team')}</p>
+            <p class="muted">${escapeHtml(item.first_name)} ${escapeHtml(item.last_name)} | ${escapeHtml(item.team_name || 'No team')} | ${escapeHtml(item.assigned_user_name || 'Unassigned')}</p>
           </div>
-          <span class="badge blue">${escapeHtml(item.interaction_type)}</span>
+          <span class="badge blue">${escapeHtml(item.item_type || item.interaction_type)}</span>
         </header>
         <p>${escapeHtml(item.summary)}</p>
-        <p class="muted small">${escapeHtml(formatDate(item.occurred_at))}</p>
+        <p class="muted small">${escapeHtml(item.item_status || 'scheduled')} | ${escapeHtml(formatDate(item.calendar_at || item.occurred_at))}</p>
       </article>`;
   }
 

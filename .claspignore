@@ -3,6 +3,7 @@ src/**
 scripts/**
 migrations/**
 worker/**
+tests/**
 design/**
 .wrangler/**
 wrangler.toml

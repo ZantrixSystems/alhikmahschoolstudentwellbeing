@@ -20,6 +20,7 @@ Interim student wellbeing and casework platform.
 ```bash
 npm install
 npm run migrate
+npm test
 ```
 
 ## Worker
@@ -63,3 +64,4 @@ npm run apps:deploy
 - Do not expose the Worker URL as a user-facing app route.
 - SQL is parameterised and structured filters compile only through allowlisted fields.
 - Worker-side permissions and team visibility are authoritative.
+- Signed Apps Script requests use persistent nonce replay protection in Neon.

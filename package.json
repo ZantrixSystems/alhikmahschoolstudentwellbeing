@@ -12,7 +12,8 @@
     "worker:secret:database": "wrangler secret put DATABASE_URL",
     "worker:secret:bridge": "wrangler secret put WORKER_SHARED_SECRET",
     "migrate": "node --env-file=.env.local scripts/migrate.js",
-    "check": "node --check worker/index.js"
+    "check": "node --check worker/index.js && node --check tests/worker.test.js",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",

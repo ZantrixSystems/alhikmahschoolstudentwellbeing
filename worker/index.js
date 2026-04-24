@@ -58,10 +58,15 @@ async function verifySignedAppsScriptRequest(request, rawBody, env) {
   const nonce = request.headers.get('X-AHW-Nonce') || '';
   const email = (request.headers.get('X-AHW-User-Email') || '').trim().toLowerCase();
   const signature = request.headers.get('X-AHW-Signature') || '';
+  const keyId = request.headers.get('X-AHW-Key-Id') || 'apps-script-main';
   if (!timestamp || !nonce || !email || !signature) {
     throw new AppError('Missing signed bridge headers', 401);
   }
-  if (Math.abs(Date.now() - Number(timestamp)) > 5 * 60 * 1000) {
+  const timestampMs = Number(timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    throw new AppError('Invalid signed request timestamp', 401);
+  }
+  if (Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
     throw new AppError('Signed request expired', 401);
   }
 
@@ -70,6 +75,38 @@ async function verifySignedAppsScriptRequest(request, rawBody, env) {
   if (!timingSafeEqual(signature, expected)) {
     throw new AppError('Invalid Worker bridge signature', 401);
   }
+  await persistSignedRequestNonce(env, {
+    keyId,
+    nonce,
+    email,
+    timestamp: new Date(timestampMs),
+  });
+}
+
+async function persistSignedRequestNonce(env, requestNonce) {
+  const nonceHash = await sha256Hex(requestNonce.nonce);
+  await workerQuery(
+    env,
+    'DELETE FROM signed_request_nonces WHERE expires_at < NOW()',
+    []
+  );
+  const row = await workerQueryOne(
+    env,
+    [
+      'INSERT INTO signed_request_nonces (key_id, nonce_hash, actor_email, request_timestamp, expires_at)',
+      "VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes')",
+      'ON CONFLICT (key_id, nonce_hash) DO NOTHING',
+      'RETURNING nonce_hash',
+    ].join('\n'),
+    [requestNonce.keyId, nonceHash, requestNonce.email, requestNonce.timestamp.toISOString()]
+  );
+  if (!row) throw new AppError('Signed request nonce has already been used', 401);
+}
+
+async function sha256Hex(value) {
+  const encoder = new TextEncoder();
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function hmacHex(secret, value) {
@@ -94,46 +131,57 @@ function timingSafeEqual(left, right) {
   return result === 0;
 }
 
+async function workerQuery(env, sql, params = []) {
+  if (env.__query) return env.__query(sql, params);
+  const databaseUrl = env.DATABASE_URL || env.NEON_DATABASE_URL;
+  if (!databaseUrl) throw new AppError('DATABASE_URL is not configured for the Worker', 500);
+  const response = await fetch(buildNeonSqlEndpoint(databaseUrl), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Neon-Connection-String': databaseUrl,
+      'Neon-Array-Mode': 'true',
+    },
+    body: JSON.stringify({ query: sql, params }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new AppError('Neon query failed', 500, { status: response.status, body: text.slice(0, 500) });
+  }
+  const result = text ? JSON.parse(text) : {};
+  return mapNeonRows(result);
+}
+
+async function workerQueryOne(env, sql, params = []) {
+  return (await workerQuery(env, sql, params))[0] || null;
+}
+
+function buildNeonSqlEndpoint(connectionString) {
+  const match = connectionString.match(/@([^/\?:]+)/);
+  if (!match) throw new AppError('Could not parse Neon host from connection string', 500);
+  return 'https://' + match[1].replace(/^[^.]+\./, 'api.') + '/sql';
+}
+
+function mapNeonRows(result) {
+  const rows = result.rows || [];
+  if (!rows.length || !Array.isArray(rows[0])) return rows;
+  const fields = result.fields || [];
+  return rows.map((row) => {
+    const mapped = {};
+    fields.forEach((field, index) => {
+      mapped[field.name] = row[index];
+    });
+    return mapped;
+  });
+}
+
 function createApi(env, actorEmail) {
   async function query(sql, params = []) {
-    const databaseUrl = env.DATABASE_URL || env.NEON_DATABASE_URL;
-    if (!databaseUrl) throw new AppError('DATABASE_URL is not configured for the Worker', 500);
-    const response = await fetch(buildNeonSqlEndpoint(databaseUrl), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'Neon-Connection-String': databaseUrl,
-        'Neon-Array-Mode': 'true',
-      },
-      body: JSON.stringify({ query: sql, params }),
-    });
-    const text = await response.text();
-    if (!response.ok) throw new AppError('Neon query failed', 500, { status: response.status, body: text.slice(0, 500) });
-    const result = text ? JSON.parse(text) : {};
-    return mapNeonRows(result);
+    return workerQuery(env, sql, params);
   }
 
   async function queryOne(sql, params = []) {
     return (await query(sql, params))[0] || null;
-  }
-
-  function buildNeonSqlEndpoint(connectionString) {
-    const match = connectionString.match(/@([^/\?:]+)/);
-    if (!match) throw new AppError('Could not parse Neon host from connection string', 500);
-    return 'https://' + match[1].replace(/^[^.]+\./, 'api.') + '/sql';
-  }
-
-  function mapNeonRows(result) {
-    const rows = result.rows || [];
-    if (!rows.length || !Array.isArray(rows[0])) return rows;
-    const fields = result.fields || [];
-    return rows.map((row) => {
-      const mapped = {};
-      fields.forEach((field, index) => {
-        mapped[field.name] = row[index];
-      });
-      return mapped;
-    });
   }
 
   async function loadAuthContext() {
@@ -402,10 +450,14 @@ function createApi(env, actorEmail) {
   function meetingFieldMap() {
     return {
       teamId: buildFieldRule('m.team_id'),
+      assignedTo: buildFieldRule('m.assigned_user_id'),
+      type: buildFieldRule('m.item_type'),
       interactionType: buildFieldRule('m.interaction_type'),
       createdAt: buildFieldRule('m.created_at'),
-      occurredAt: buildFieldRule('m.occurred_at'),
-      status: buildFieldRule('COALESCE(a.status, m.interaction_type)'),
+      occurredAt: buildFieldRule('m.calendar_at'),
+      meetingDate: buildFieldRule('m.calendar_at'),
+      dueDate: buildFieldRule('m.calendar_at'),
+      status: buildFieldRule('m.item_status'),
     };
   }
 
@@ -458,6 +510,14 @@ function createApi(env, actorEmail) {
         student_id: record.student_id,
         first_name: record.first_name,
         last_name: record.last_name,
+        item_type: record.item_type,
+        item_status: record.item_status,
+        interaction_type: record.interaction_type,
+        calendar_at: record.calendar_at,
+        due_at: record.due_at,
+        completed_at: record.completed_at,
+        assigned_user_id: record.assigned_user_id,
+        assigned_user_name: record.assigned_user_name,
         title: record.title,
         summary: record.summary || 'Protected event',
         occurred_at: record.occurred_at,
@@ -474,6 +534,15 @@ function createApi(env, actorEmail) {
   function applyVisibility(auth, matrix, records, contentType, visibilityField) {
     return (records || [])
       .map((record) => redactRecord(record, computeVisibility(auth, matrix, record.team_id, contentType, record[visibilityField] || 'full')))
+      .filter(Boolean);
+  }
+
+  function applyCalendarVisibility(auth, matrix, records) {
+    return (records || [])
+      .map((record) => {
+        const contentType = record.item_type === 'follow_up' ? 'actions' : 'meetings';
+        return redactRecord(record, computeVisibility(auth, matrix, record.team_id, contentType, record.visibility_level || 'summary'));
+      })
       .filter(Boolean);
   }
 
@@ -631,8 +700,8 @@ function createApi(env, actorEmail) {
     );
     const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw] = await Promise.all([
       canReviewConcerns ? query('SELECT c.id, c.team_id, t.name AS team_name, c.title, c.summary, c.detail, c.status, c.category, c.severity, c.confidentiality_level, c.created_at, c.created_at AS occurred_at FROM concerns c LEFT JOIN teams t ON t.id = c.team_id WHERE c.student_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at DESC', [studentId]) : [],
-      canViewMeetings ? query('SELECT m.id, m.team_id, t.name AS team_name, m.title, m.summary, m.detail, m.interaction_type, m.visibility_level, m.occurred_at, m.created_at FROM meetings m LEFT JOIN teams t ON t.id = m.team_id WHERE m.student_id = $1 AND m.deleted_at IS NULL ORDER BY m.occurred_at DESC', [studentId]) : [],
-      canManageActions ? query('SELECT a.id, a.team_id, t.name AS team_name, a.title, a.summary, a.status, a.priority, a.due_at, a.completed_at, a.created_at, a.created_at AS occurred_at FROM actions a LEFT JOIN teams t ON t.id = a.team_id WHERE a.student_id = $1 AND a.deleted_at IS NULL ORDER BY a.created_at DESC', [studentId]) : [],
+      canViewMeetings ? query('SELECT m.id, m.team_id, t.name AS team_name, m.title, m.summary, m.detail, m.interaction_type, m.visibility_level, m.occurred_at, m.created_at, m.occurred_at AS calendar_at, u.display_name AS assigned_user_name FROM meetings m LEFT JOIN teams t ON t.id = m.team_id LEFT JOIN users u ON u.id = m.logged_by_user_id WHERE m.student_id = $1 AND m.deleted_at IS NULL ORDER BY m.occurred_at DESC', [studentId]) : [],
+      canManageActions ? query('SELECT a.id, a.team_id, t.name AS team_name, a.title, a.summary, a.status, a.priority, a.due_at, a.completed_at, a.created_at, COALESCE(a.due_at, a.created_at) AS occurred_at, a.due_at AS calendar_at, COALESCE(a.visibility_level, \'summary\') AS visibility_level, u.display_name AS assigned_user_name FROM actions a LEFT JOIN teams t ON t.id = a.team_id LEFT JOIN users u ON u.id = a.owner_user_id WHERE a.student_id = $1 AND a.deleted_at IS NULL ORDER BY COALESCE(a.due_at, a.created_at) DESC', [studentId]) : [],
       canViewNotes ? query('SELECT n.id, n.team_id, t.name AS team_name, n.summary AS title, n.summary, n.body, n.note_type, n.visibility_level, n.created_at, n.created_at AS occurred_at FROM notes n LEFT JOIN teams t ON t.id = n.team_id WHERE n.student_id = $1 AND n.deleted_at IS NULL ORDER BY n.created_at DESC', [studentId]) : [],
       canViewChronology ? query('SELECT ce.id, ce.team_id, t.name AS team_name, ce.title, ce.summary, ce.detail, ce.event_type, ce.visibility_level, ce.occurred_at, ce.created_at FROM chronology_events ce LEFT JOIN teams t ON t.id = ce.team_id WHERE ce.student_id = $1 AND ce.deleted_at IS NULL ORDER BY ce.occurred_at DESC LIMIT 100', [studentId]) : [],
     ]);
@@ -695,10 +764,10 @@ function createApi(env, actorEmail) {
     if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
     const action = await queryOne(
       [
-        'INSERT INTO actions (student_id, team_id, owner_user_id, title, summary, status, priority, due_at, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $3, $3) RETURNING *',
+        'INSERT INTO actions (student_id, team_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $3, $3) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null]
+      [body.studentId, body.teamId || null, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary']
     );
     await addChronology(auth, body.studentId, 'actions', action.id, 'follow_up_created', body.teamId, body.title, body.summary, null, 'summary');
     return { action };
@@ -745,23 +814,52 @@ function createApi(env, actorEmail) {
     const search = requestQuery.q ? String(requestQuery.q).trim().toLowerCase() : '';
     if (search) {
       const placeholder = pushParam(params, '%' + search + '%');
-      searchSql = '(LOWER(m.title) LIKE ' + placeholder + ' OR LOWER(m.summary) LIKE ' + placeholder + ' OR LOWER(s.first_name) LIKE ' + placeholder + ' OR LOWER(s.last_name) LIKE ' + placeholder + ')';
+      searchSql = '(LOWER(m.title) LIKE ' + placeholder + ' OR LOWER(m.summary) LIKE ' + placeholder + ' OR LOWER(m.first_name) LIKE ' + placeholder + ' OR LOWER(m.last_name) LIKE ' + placeholder + ')';
     }
     const rows = await query(
       [
-        'SELECT m.id, m.student_id, m.team_id, s.first_name, s.last_name, s.year_group, m.title, m.summary,',
-        '  m.interaction_type, m.visibility_level, m.occurred_at, t.name AS team_name, NULL::text AS status, NULL::timestamptz AS due_at',
-        'FROM meetings m',
-        'JOIN students s ON s.id = m.student_id',
-        'LEFT JOIN teams t ON t.id = m.team_id',
-        'LEFT JOIN actions a ON FALSE',
-        'WHERE m.deleted_at IS NULL AND s.deleted_at IS NULL AND ' + filterSql + ' AND ' + searchSql,
-        'ORDER BY m.occurred_at DESC LIMIT 100',
+        'SELECT * FROM (',
+        "  SELECT 'meeting' AS item_type, m.id, m.student_id, m.team_id, s.first_name, s.last_name, s.year_group,",
+        '    m.title, m.summary, m.detail, m.interaction_type, m.visibility_level, m.occurred_at AS calendar_at,',
+        '    m.occurred_at, m.created_at, m.logged_by_user_id AS assigned_user_id, u.display_name AS assigned_user_name,',
+        "    'scheduled'::text AS item_status, NULL::timestamptz AS due_at, NULL::timestamptz AS completed_at, NULL::text AS priority,",
+        '    t.name AS team_name',
+        '  FROM meetings m',
+        '  JOIN students s ON s.id = m.student_id',
+        '  LEFT JOIN teams t ON t.id = m.team_id',
+        '  LEFT JOIN users u ON u.id = m.logged_by_user_id',
+        '  WHERE m.deleted_at IS NULL AND s.deleted_at IS NULL',
+        '  UNION ALL',
+        "  SELECT 'follow_up' AS item_type, a.id, a.student_id, a.team_id, s.first_name, s.last_name, s.year_group,",
+        "    a.title, a.summary, NULL::text AS detail, 'follow_up' AS interaction_type, COALESCE(a.visibility_level, 'summary') AS visibility_level,",
+        '    COALESCE(a.due_at, a.created_at) AS calendar_at, COALESCE(a.due_at, a.created_at) AS occurred_at, a.created_at,',
+        '    a.owner_user_id AS assigned_user_id, u.display_name AS assigned_user_name, a.status AS item_status,',
+        '    a.due_at, a.completed_at, a.priority, t.name AS team_name',
+        '  FROM actions a',
+        '  JOIN students s ON s.id = a.student_id',
+        '  LEFT JOIN teams t ON t.id = a.team_id',
+        '  LEFT JOIN users u ON u.id = a.owner_user_id',
+        '  WHERE a.deleted_at IS NULL AND s.deleted_at IS NULL',
+        ') m',
+        'WHERE ' + filterSql + ' AND ' + searchSql,
+        '  AND (m.assigned_user_id = $' + (params.length + 1),
+        '    OR m.team_id IS NULL',
+        '    OR m.team_id = ANY($' + (params.length + 2) + '::uuid[])',
+        '    OR EXISTS (',
+        '      SELECT 1 FROM team_visibility_rules tvr',
+        '      WHERE tvr.deleted_at IS NULL',
+        '        AND tvr.source_team_id = ANY($' + (params.length + 2) + '::uuid[])',
+        '        AND tvr.target_team_id = m.team_id',
+        "        AND tvr.content_type IN ('meetings', 'actions')",
+        "        AND tvr.visibility_level <> 'none'",
+        '    )',
+        '  )',
+        'ORDER BY m.calendar_at ASC LIMIT 150',
       ].join('\n'),
-      params
+      params.concat([auth.userId, auth.teamIds])
     );
     const matrix = await getVisibilityMatrix(auth.teamIds);
-    return { meetings: applyVisibility(auth, matrix, rows, 'meetings', 'visibility_level'), filter: filterExpression };
+    return { meetings: applyCalendarVisibility(auth, matrix, rows), filter: filterExpression };
   }
 
   async function getSettingsReferencePayload(auth) {
@@ -860,3 +958,13 @@ function createApi(env, actorEmail) {
 function compactUnique(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
+
+export {
+  AppError,
+  createApi,
+  hmacHex,
+  persistSignedRequestNonce,
+  timingSafeEqual,
+  verifySignedAppsScriptRequest,
+  workerQuery,
+};

@@ -6,4 +6,5 @@
 - Record-level policies are implemented in app logic, not PostgreSQL RLS
 - Student transfer package is placeholder only in this beta
 - If the repo design folder is added later, the token layer may need visual alignment work
-- Worker nonce replay protection is timestamp-based only in this beta; persistent nonce storage is a future hardening step
+- Worker nonce cleanup is opportunistic in the request path; scheduled cleanup can be added later if volume grows
+- PostgreSQL RLS is deliberately deferred as a later hardening option; Worker-side checks remain authoritative for this beta

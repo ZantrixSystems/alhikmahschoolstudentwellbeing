@@ -25,6 +25,10 @@ json-body
 
 The Apps Script property `WORKER_SHARED_SECRET` and Worker secret `WORKER_SHARED_SECRET` must match. Requests older than five minutes are rejected.
 
+## Nonce Replay Protection
+
+After signature verification, the Worker hashes the nonce and inserts it into `signed_request_nonces` with the bridge key id and an expiry timestamp. The `(key_id, nonce_hash)` primary key makes replay attempts fail atomically. Expired nonces are deleted opportunistically during signed request verification.
+
 ## Domain Restriction
 
 - Allowed Workspace domains are stored in `app_settings`.
@@ -40,6 +44,6 @@ The Apps Script property `WORKER_SHARED_SECRET` and Worker secret `WORKER_SHARED
 
 ## Future Hardening
 
-- Add replay nonce storage if the threat model requires it.
+- Replace opportunistic nonce cleanup with scheduled cleanup if request volume grows.
 - Add Google ID token verification if Apps Script identity becomes insufficient.
 - Add device, network, and anomaly signals for a full MIS platform.

@@ -6,9 +6,12 @@
 - Removed direct Neon access from Apps Script.
 - Added signed Apps Script-to-Worker requests with timestamp, nonce, Workspace email, and HMAC signature.
 - Added Worker route handling for students, profiles, notes, concerns, meetings, follow-ups, radar, settings, saved filters, audit logs, and structured filters.
+- Added persistent signed-request nonce replay protection.
+- Added automated Worker tests for permissions, redaction, structured filters, team visibility, and nonce replay.
 - Tightened the UI with compact headers, denser student table, friendly filter builder, calendar/list view, and Jira-style profile action bar.
 - Removed the standalone Concerns navigation item; concerns are logged from the student profile.
 - Added migration `006_hybrid_beta_defaults.sql` for radar labels and caseworker student creation.
+- Added migration `007_beta_hardening_nonce_calendar.sql` for nonce persistence, action visibility, and calendar indexes.
 
 ## Current Architecture
 
@@ -26,10 +29,8 @@
 
 ## Remaining Incomplete
 
-- Worker nonce replay protection is timestamp-only.
-- Calendar is a lightweight grouped view, not a full scheduling engine.
-- Automated regression tests are still needed around permissions, redaction, and filter parsing.
-- Follow-up records currently use the `actions` table and appear mainly through profile/timeline and dashboard counts.
+- Calendar remains beta-lightweight and is not a full scheduling engine.
+- PostgreSQL RLS is not implemented yet; keep it as a later hardening option.
 - Deployment note: Apps Script Execution API invocation was not permitted from `clasp`, so the current production deployment was aligned with the Worker secret at deploy time. Before the next clean redeploy, set Apps Script script properties or repeat the bridge-secret deployment alignment.
 
 ## Required Secrets
@@ -53,11 +54,12 @@ Local migration secret:
 
 1. Run `npm install`.
 2. Run `npm run migrate`.
-3. Set Worker secrets with `npm run worker:secret:database` and `npm run worker:secret:bridge`.
-4. Deploy Worker with `npm run worker:deploy`.
-5. Set Apps Script script properties.
-6. Push Apps Script with `npm run apps:push`.
-7. Redeploy Apps Script with `npm run apps:deploy`.
+3. Run `npm test`.
+4. Set Worker secrets with `npm run worker:secret:database` and `npm run worker:secret:bridge`.
+5. Deploy Worker with `npm run worker:deploy`.
+6. Set Apps Script script properties.
+7. Push Apps Script with `npm run apps:push`.
+8. Redeploy Apps Script with `npm run apps:deploy`.
 
 ## Test First
 

@@ -39,3 +39,11 @@ The interim wellbeing app contains sensitive student casework data. Direct Neon 
 ## Deployment Follow-Up
 
 On 2026-04-24 the Worker and Apps Script production deployment were deployed. `clasp run` could not invoke a property-setting helper because the Apps Script Execution API path was not permitted for this project. The production version was therefore aligned with the Worker bridge secret at deployment time, then the local source was scrubbed back to property-based configuration. Migration path: set `WORKER_API_URL` and `WORKER_SHARED_SECRET` as Apps Script script properties before the next clean Apps Script redeploy.
+
+## Beta Hardening Follow-Up
+
+- Added persistent nonce replay protection through `signed_request_nonces`.
+- Added Worker tests for permission enforcement, response redaction, structured filters, team visibility, and nonce replay.
+- Extended follow-ups to carry visibility metadata and appear in the calendar alongside meetings.
+- Calendar/list views now expose assigned user, status, date, linked student, and item type where permitted.
+- PostgreSQL RLS remains deferred as a later hardening option rather than part of this beta pass.
