@@ -7,7 +7,8 @@
   };
 
   function setStatus(text) {
-    document.getElementById('globalStatus').textContent = text;
+    const el = document.getElementById('globalStatus');
+    if (el) el.textContent = text;
   }
 
   function showMessage(text, mode) {
@@ -27,12 +28,12 @@
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler((result) => {
-          setStatus('Ready');
+          setStatus('');
           resolve(result);
         })
         .withFailureHandler((error) => {
           setStatus('Error');
-          showMessage(error.message || 'Something went wrong', 'error');
+          showMessage('Something went wrong. Please try again or contact support.', 'error');
           reject(error);
         })
         .apiProxy(request);
@@ -46,6 +47,7 @@
       studentId: url.searchParams.get('studentId') || '',
       q: url.searchParams.get('q') || '',
       filter: url.searchParams.get('filter') || '',
+      filterMode: url.searchParams.get('filterMode') || (url.searchParams.get('filter') ? 'advanced' : 'builder'),
       view: url.searchParams.get('view') || 'calendar',
       settingsTab: url.searchParams.get('settingsTab') || 'users',
     };
@@ -82,6 +84,17 @@
     return new Date(value).toLocaleString([], options);
   }
 
+  function friendlyLabel(value) {
+    return String(value || '')
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function friendlyVisibility(value) {
+    const labels = { none: 'Hidden', indicator: 'Limited', summary: 'Summary', full: 'Full' };
+    return labels[value] || friendlyLabel(value);
+  }
+
   function studentName(student) {
     return [student.preferred_name || student.first_name, student.last_name].filter(Boolean).join(' ');
   }
@@ -91,7 +104,7 @@
   }
 
   function renderFilterChips(expression) {
-    if (!expression) return '<span class="muted small">No structured filter applied.</span>';
+    if (!expression) return '<span class="muted small">No filters applied.</span>';
     return expression
       .split(/(?=[;,])/)
       .map((part) => part.replace(/^[;,]/, '').trim())
@@ -107,12 +120,14 @@
     const status = document.getElementById('filterStatus').value;
     const lead = document.getElementById('filterLead').value;
     const latestAfter = document.getElementById('filterLatestAfter').value;
+    const latestBefore = document.getElementById('filterLatestBefore').value;
     const openFollowUp = document.getElementById('filterOpenFollowUp').checked;
     if (year) parts.push('yearGroup==' + year);
     if (radar) parts.push('radar==' + radar);
     if (status) parts.push('status==' + status);
     if (lead) parts.push('lead~=' + lead.replace(/\s+/g, '_'));
     if (latestAfter) parts.push('latestActivity>=' + latestAfter);
+    if (latestBefore) parts.push('latestActivity<=' + latestBefore);
     if (openFollowUp) parts.push('openFollowUp==true');
     return parts.join(';');
   }
@@ -134,11 +149,19 @@
     document.getElementById('pageTitle').textContent = text;
   }
 
+  function skeletonCards(count) {
+    return Array.from({ length: count }, () => '<article class="skeleton-card"></article>').join('');
+  }
+
+  function skeletonRows(count) {
+    return `<div class="skeleton-stack">${Array.from({ length: count }, () => '<div class="skeleton-row"></div>').join('')}</div>`;
+  }
+
   function renderDashboard() {
     setPageTitle('Dashboard');
     const target = document.getElementById('dashboardPage');
     target.innerHTML = `
-      <section class="grid-cards compact-metrics" id="headlineCards"></section>
+      <section class="grid-cards compact-metrics" id="headlineCards">${skeletonCards(4)}</section>
       <section class="two-col">
         <article class="panel">
           <div class="panel-header">
@@ -147,21 +170,16 @@
               <h3 class="section-title">Team Load</h3>
             </div>
           </div>
-          <div id="teamLoadList" class="list compact-list"></div>
+          <div id="teamLoadList" class="list compact-list">${skeletonRows(4)}</div>
         </article>
         <article class="panel">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Filters</p>
-              <h3 class="section-title">Useful Views</h3>
+              <p class="eyebrow">Upcoming</p>
+              <h3 class="section-title">My Follow-ups</h3>
             </div>
           </div>
-          <div class="stack muted">
-            <p><code>radar==safeguarding</code></p>
-            <p><code>status==open;yearGroup==Y8</code></p>
-            <p><code>name~=ahmed</code></p>
-            <p><code>radar=in=(safeguarding,pastoral)</code></p>
-          </div>
+          <div id="dashboardUpcoming" class="list compact-list">${skeletonRows(4)}</div>
         </article>
       </section>
     `;
@@ -190,6 +208,15 @@
           </header>
         </article>`).join('');
     });
+    if (hasPermission('meetings.view')) {
+      callServer({ path: '/api/meetings', method: 'get', query: { filter: 'type==follow_up;status=in=(open,in_progress)' } }).then((data) => {
+        const upcoming = (data.meetings || []).slice(0, 6);
+        document.getElementById('dashboardUpcoming').innerHTML = upcoming.map(renderMeetingRecord).join('') || '<p class="muted">No upcoming follow-ups.</p>';
+        bindStudentLinks();
+      });
+    } else {
+      document.getElementById('dashboardUpcoming').innerHTML = '<p class="muted">No upcoming follow-ups.</p>';
+    }
   }
 
   function renderStudentsPage() {
@@ -202,6 +229,7 @@
     const teamOptions = (state.bootstrap.teams || [])
       .map((team) => `<option value="${escapeHtml(team.team_key)}">${escapeHtml(team.name)}</option>`)
       .join('');
+    const isAdvanced = state.route.filterMode === 'advanced';
 
     target.innerHTML = `
       <section class="panel compact-panel">
@@ -210,7 +238,13 @@
             <p class="eyebrow">Directory</p>
             <h3 class="section-title">Students</h3>
           </div>
-          ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">New student</button>' : ''}
+          <div class="table-actions">
+            <div class="segmented">
+              <button class="button ${!isAdvanced ? '' : 'secondary'}" id="builderModeButton">Builder</button>
+              <button class="button ${isAdvanced ? '' : 'secondary'}" id="advancedModeButton">Advanced</button>
+            </div>
+            ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">New student</button>' : ''}
+          </div>
         </div>
         <div id="newStudentForm" class="inline-form hidden">
           <div class="form-grid">
@@ -223,36 +257,46 @@
             <button class="button span-2" id="createStudentButton">Create student</button>
           </div>
         </div>
-        <div class="filter-builder">
-          <input id="studentSearch" class="search-input" value="${escapeHtml(state.route.q)}" placeholder="Quick search by name or code">
+        <div class="student-filter-shell">
+        <div id="builderFilters" class="filter-builder ${isAdvanced ? 'hidden' : ''}">
+          <input id="studentSearch" class="search-input" value="${escapeHtml(state.route.q)}" placeholder="Search name or code">
           <input id="filterYear" placeholder="Year / class">
           <select id="filterRadar"><option value="">Any radar</option>${teamOptions}</select>
           <select id="filterStatus"><option value="">Any status</option><option value="active">Active</option><option value="monitoring">Monitoring</option><option value="closed">Closed</option></select>
           <input id="filterLead" placeholder="Lead">
-          <input id="filterLatestAfter" type="date" title="Latest activity after">
-          <label class="check-control"><input id="filterOpenFollowUp" type="checkbox"> Open follow-up</label>
-          <button class="button secondary" id="buildFilterButton">Build</button>
+          <input id="filterLatestAfter" type="date" title="Activity after">
+          <input id="filterLatestBefore" type="date" title="Activity before">
+          <button class="button" id="applyBuilderFilter">Apply</button>
         </div>
-        <div class="toolbar advanced-toolbar">
+        <div id="advancedFilters" class="toolbar advanced-toolbar ${isAdvanced ? '' : 'hidden'}">
           <input id="studentFilter" class="filter-input" value="${escapeHtml(state.route.filter)}" placeholder="Advanced filter, e.g. radar==safeguarding;latestActivity>=2026-01-01">
           <select id="studentSavedFilter"><option value="">Saved filters</option>${savedOptions}</select>
           <button class="button" id="applyStudentFilter">Apply</button>
-          <button class="button secondary" id="saveStudentFilter">Save</button>
+          <button class="button secondary" id="saveStudentFilter">Save view</button>
         </div>
-        <div class="chip-row" id="studentFilterChips">${renderFilterChips(state.route.filter)}</div>
+        <div class="filter-switch">
+          <div class="chip-row" id="studentFilterChips">${renderFilterChips(state.route.filter)}</div>
+          <div class="filter-mode-actions">
+            <label class="check-control"><input id="filterOpenFollowUp" type="checkbox"> Open follow-up</label>
+            <button class="text-button" id="clearStudentFilters">Clear</button>
+          </div>
+        </div>
+        </div>
       </section>
-      <section class="panel compact-panel">
-        <div id="studentTable"></div>
+      <section class="panel compact-panel student-table-panel">
+        <div id="studentTable" class="table-scroll">${skeletonRows(10)}</div>
       </section>
     `;
 
     const toggle = document.getElementById('newStudentToggle');
     if (toggle) toggle.onclick = () => document.getElementById('newStudentForm').classList.toggle('hidden');
-    document.getElementById('buildFilterButton').onclick = () => {
-      document.getElementById('studentFilter').value = buildStudentFilterFromBuilder();
+    document.getElementById('builderModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'builder' });
+    document.getElementById('advancedModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'advanced' });
+    document.getElementById('applyBuilderFilter').onclick = () => {
+      updateRoute({ page: 'students', q: document.getElementById('studentSearch').value, filter: buildStudentFilterFromBuilder(), filterMode: 'builder' });
     };
     document.getElementById('applyStudentFilter').onclick = () => {
-      updateRoute({ page: 'students', q: document.getElementById('studentSearch').value, filter: document.getElementById('studentFilter').value });
+      updateRoute({ page: 'students', q: state.route.q, filter: document.getElementById('studentFilter').value, filterMode: 'advanced' });
     };
     document.getElementById('studentSavedFilter').onchange = (event) => {
       document.getElementById('studentFilter').value = event.target.value;
@@ -269,6 +313,7 @@
         bootstrapApp();
       });
     };
+    document.getElementById('clearStudentFilters').onclick = () => updateRoute({ page: 'students', q: '', filter: '', filterMode: 'builder' });
     const createButton = document.getElementById('createStudentButton');
     if (createButton) {
       createButton.onclick = () => {
@@ -324,7 +369,7 @@
       note: `
         <div class="form-grid">
           <input id="noteSummary" class="span-2" placeholder="Short note summary">
-          <textarea id="noteBody" class="span-2" rows="3" placeholder="Casework note"></textarea>
+          <textarea id="noteBody" class="span-2" rows="3" placeholder="Support note"></textarea>
           <select id="noteTeam"><option value="">No team</option>${teams}</select>
           <button class="button" id="submitNote">Add note</button>
         </div>`,
@@ -446,11 +491,11 @@
     return items.slice(0, 80).map((item) => `
       <div class="timeline-item">
         <div class="timeline-head">
-          <h4>${escapeHtml(item.title || item.source)}</h4>
-          <span class="badge">${escapeHtml(item.source || 'event')}</span>
+          <h4>${escapeHtml(item.title || friendlyLabel(item.source))}</h4>
+          <span class="badge">${escapeHtml(friendlyLabel(item.source || 'event'))}</span>
         </div>
         <p>${escapeHtml(item.summary || 'Protected event')}</p>
-        <p class="muted small">${escapeHtml(item.team_name || 'System')} | ${escapeHtml(item.visibility || item.visibility_level || 'summary')} | ${escapeHtml(formatDate(item.occurred_at || item.created_at))}</p>
+        <p class="muted small">${escapeHtml(item.team_name || 'School record')} | ${escapeHtml(friendlyVisibility(item.visibility || item.visibility_level || 'summary'))} | ${escapeHtml(formatDate(item.occurred_at || item.created_at))}</p>
       </div>`).join('');
   }
 
@@ -492,7 +537,7 @@
             <div class="panel-header">
               <div>
                 <p class="eyebrow">Timeline</p>
-                <h3 class="section-title">Casework Activity</h3>
+                <h3 class="section-title">Activity</h3>
               </div>
             </div>
             <div class="timeline">${buildTimeline(data)}</div>
@@ -509,7 +554,7 @@
               </dl>
             </article>
             <article class="panel compact-panel">
-              <p class="eyebrow">Radar Metadata</p>
+              <p class="eyebrow">Radar Details</p>
               <div class="list compact-list">
                 ${(data.radar || []).map((radar) => `
                   <article class="mini-record">
@@ -550,12 +595,12 @@
         </div>
         <div class="toolbar">
           <input id="meetingSearchPage" class="search-input" value="${escapeHtml(state.route.q)}" placeholder="Search meetings or students">
-          <input id="meetingFilterPage" class="filter-input" value="${escapeHtml(state.route.filter)}" placeholder="type==follow_up;status==open or interactionType==review_meeting">
+          <input id="meetingFilterPage" class="filter-input" value="${escapeHtml(state.route.filter)}" placeholder="Filter calendar">
           <button class="button" id="applyMeetingFilter">Apply</button>
         </div>
         <div class="chip-row">${renderFilterChips(state.route.filter)}</div>
       </section>
-      <section class="panel compact-panel" id="meetingViewHost"><p class="muted">Loading calendar...</p></section>
+      <section class="panel compact-panel" id="meetingViewHost">${skeletonRows(8)}</section>
     `;
     document.getElementById('calendarView').onclick = () => updateRoute({ page: 'meetings', view: 'calendar' });
     document.getElementById('listView').onclick = () => updateRoute({ page: 'meetings', view: 'list' });
@@ -616,22 +661,22 @@
   function renderSettingsPage() {
     setPageTitle('Settings');
     const target = document.getElementById('settingsPage');
-    target.innerHTML = '<section class="panel"><p class="muted">Loading settings...</p></section>';
+    const tab = state.route.settingsTab || 'users';
+    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Visibility'], ['filters', 'Filters'], ['audit', 'Audit']];
+    target.innerHTML = `
+      <section class="panel compact-panel"><div class="tabs">${tabs.map(([key, label]) => `<button class="button ${tab === key ? '' : 'secondary'}" data-settings-tab="${key}">${label}</button>`).join('')}</div></section>
+      <section class="panel compact-panel" id="settingsBody">${skeletonRows(8)}</section>`;
+    Array.from(target.querySelectorAll('[data-settings-tab]')).forEach((button) => button.onclick = () => updateRoute({ page: 'settings', settingsTab: button.dataset.settingsTab }));
     callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
-      const tab = state.route.settingsTab || 'users';
-      const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Visibility'], ['filters', 'Filters'], ['audit', 'Audit']];
       const bodyByTab = {
         users: renderUsersSettings(data),
         roles: renderRolesSettings(data),
         teams: renderTeamsSettings(data),
         visibility: renderVisibilitySettings(data),
         filters: renderSavedFiltersSettings(data),
-        audit: '<article class="panel compact-panel"><div id="auditLogTable"><p class="muted">Loading audit...</p></div></article>',
+        audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
       };
-      target.innerHTML = `
-        <section class="panel compact-panel"><div class="toolbar">${tabs.map(([key, label]) => `<button class="button ${tab === key ? '' : 'secondary'}" data-settings-tab="${key}">${label}</button>`).join('')}</div></section>
-        ${bodyByTab[tab]}`;
-      Array.from(target.querySelectorAll('[data-settings-tab]')).forEach((button) => button.onclick = () => updateRoute({ page: 'settings', settingsTab: button.dataset.settingsTab }));
+      document.getElementById('settingsBody').outerHTML = bodyByTab[tab];
       bindSettingsForms();
       if (tab === 'audit') loadAuditLog();
     });
@@ -640,7 +685,7 @@
   function renderUsersSettings(data) {
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Users</h3><table class="data-table dense-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th></tr></thead><tbody>${(data.users || []).map((u) => `<tr><td>${escapeHtml(u.display_name)}</td><td>${escapeHtml(u.email)}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td></tr>`).join('')}</tbody></table></article>
+        <article class="panel compact-panel"><h3 class="section-title">Users</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th></tr></thead><tbody>${(data.users || []).map((u) => `<tr><td>${escapeHtml(u.display_name)}</td><td>${escapeHtml(u.email)}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td></tr>`).join('')}</tbody></table></div></article>
         <article class="panel compact-panel"><h3 class="section-title">Add User</h3><div class="form-grid"><input id="userEmail" class="span-2" placeholder="user@school.org"><input id="userDisplayName" class="span-2" placeholder="Display name"><select id="userPrimaryTeam">${(data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select><select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select><button class="button span-2" id="saveUserButton">Save user</button></div></article>
       </div>`;
   }
@@ -648,16 +693,16 @@
   function renderRolesSettings(data) {
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Roles</h3><table class="data-table dense-table"><thead><tr><th>Role</th><th>Description</th><th>System</th></tr></thead><tbody>${(data.roles || []).map((r) => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.description || '')}</td><td>${r.is_system ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></article>
-        <article class="panel compact-panel"><h3 class="section-title">Custom Role</h3><div class="form-grid"><input id="roleKey" placeholder="role key"><input id="roleName" placeholder="Role name"><textarea id="roleDescription" class="span-2" rows="2" placeholder="Description"></textarea><select id="rolePermissions" class="span-2" multiple size="8">${(data.permissions || []).map((p) => `<option value="${p.permission_key}">${escapeHtml(p.permission_key)}</option>`).join('')}</select><button class="button span-2" id="saveRoleButton">Save role</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Roles</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Role</th><th>Description</th></tr></thead><tbody>${(data.roles || []).map((r) => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.description || '')}</td></tr>`).join('')}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Custom Role</h3><div class="form-grid"><input id="roleKey" placeholder="Short code"><input id="roleName" placeholder="Role name"><textarea id="roleDescription" class="span-2" rows="2" placeholder="Description"></textarea><select id="rolePermissions" class="span-2" multiple size="8">${(data.permissions || []).map((p) => `<option value="${p.permission_key}">${escapeHtml(p.description || friendlyLabel(p.permission_key))}</option>`).join('')}</select><button class="button span-2" id="saveRoleButton">Save role</button></div></article>
       </div>`;
   }
 
   function renderTeamsSettings(data) {
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Teams</h3><table class="data-table dense-table"><thead><tr><th>Team</th><th>Key</th><th>Active</th></tr></thead><tbody>${(data.teams || []).map((t) => `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.team_key)}</td><td>${t.is_active ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></article>
-        <article class="panel compact-panel"><h3 class="section-title">Add Team</h3><div class="form-grid"><input id="teamKey" placeholder="team key"><input id="teamName" placeholder="Team name"><input id="teamAccentColor" value="#2F6B66" placeholder="#2F6B66"><select id="teamActive"><option value="true">Active</option><option value="false">Inactive</option></select><textarea id="teamDescription" class="span-2" rows="2" placeholder="Description"></textarea><button class="button span-2" id="saveTeamButton">Save team</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Teams</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Team</th><th>Short Code</th><th>Active</th></tr></thead><tbody>${(data.teams || []).map((t) => `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.team_key)}</td><td>${t.is_active ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Add Team</h3><div class="form-grid"><input id="teamKey" placeholder="Short code"><input id="teamName" placeholder="Team name"><input id="teamAccentColor" value="#2F6B66" placeholder="#2F6B66"><select id="teamActive"><option value="true">Active</option><option value="false">Inactive</option></select><textarea id="teamDescription" class="span-2" rows="2" placeholder="Description"></textarea><button class="button span-2" id="saveTeamButton">Save team</button></div></article>
       </div>`;
   }
 
@@ -665,13 +710,13 @@
     const teamOptions = (data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Team Visibility Matrix</h3><table class="data-table dense-table"><thead><tr><th>Source</th><th>Target</th><th>Content</th><th>Level</th></tr></thead><tbody>${(data.visibilityRules || []).map((r) => `<tr><td>${escapeHtml(r.source_team_name)}</td><td>${escapeHtml(r.target_team_name)}</td><td>${escapeHtml(r.content_type)}</td><td>${escapeHtml(r.visibility_level)}</td></tr>`).join('')}</tbody></table></article>
-        <article class="panel compact-panel"><h3 class="section-title">Add Rule</h3><div class="form-grid"><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><select id="visibilityContent"><option value="radar">Radar</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Actions</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">None</option><option value="indicator">Indicator</option><option value="summary">Summary</option><option value="full">Full</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>From</th><th>To</th><th>Record</th><th>Access</th></tr></thead><tbody>${(data.visibilityRules || []).map((r) => `<tr><td>${escapeHtml(r.source_team_name)}</td><td>${escapeHtml(r.target_team_name)}</td><td>${escapeHtml(friendlyLabel(r.content_type))}</td><td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td></tr>`).join('')}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Add Rule</h3><div class="form-grid"><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><select id="visibilityContent"><option value="radar">Radar</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Limited</option><option value="summary">Summary</option><option value="full">Full</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
       </div>`;
   }
 
   function renderSavedFiltersSettings(data) {
-    return `<article class="panel compact-panel"><h3 class="section-title">Saved Filters</h3><table class="data-table dense-table"><thead><tr><th>Name</th><th>Area</th><th>Filter</th><th>Shared</th></tr></thead><tbody>${(data.savedFilters || []).map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${escapeHtml(f.area_key)}</td><td><code>${escapeHtml(f.filter_expression)}</code></td><td>${f.is_shared ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></article>`;
+    return `<article class="panel compact-panel"><h3 class="section-title">Saved Filters</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Area</th><th>Advanced Filter</th><th>Shared</th></tr></thead><tbody>${(data.savedFilters || []).map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${escapeHtml(friendlyLabel(f.area_key))}</td><td><code>${escapeHtml(f.filter_expression)}</code></td><td>${f.is_shared ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></div></article>`;
   }
 
   function bindSettingsForms() {
@@ -687,7 +732,7 @@
 
   function loadAuditLog() {
     callServer({ path: '/api/audit-logs', method: 'get' }).then((data) => {
-      document.getElementById('auditLogTable').innerHTML = `<table class="data-table dense-table"><thead><tr><th>When</th><th>Actor</th><th>Area</th><th>Action</th><th>Student</th></tr></thead><tbody>${(data.auditLogs || []).map((entry) => `<tr><td>${escapeHtml(formatDate(entry.created_at))}</td><td>${escapeHtml(entry.actor_name || 'System')}</td><td>${escapeHtml(entry.area_key)}</td><td>${escapeHtml(entry.action_key)}</td><td>${entry.student_code ? escapeHtml(entry.student_code + ' | ' + entry.first_name + ' ' + entry.last_name) : ''}</td></tr>`).join('')}</tbody></table>`;
+      document.getElementById('auditLogTable').innerHTML = `<div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>When</th><th>Actor</th><th>Area</th><th>Action</th><th>Student</th></tr></thead><tbody>${(data.auditLogs || []).map((entry) => `<tr><td>${escapeHtml(formatDate(entry.created_at))}</td><td>${escapeHtml(entry.actor_name || 'Automated')}</td><td>${escapeHtml(friendlyLabel(entry.area_key))}</td><td>${escapeHtml(friendlyLabel(entry.action_key))}</td><td>${entry.student_code ? escapeHtml(entry.student_code + ' | ' + entry.first_name + ' ' + entry.last_name) : ''}</td></tr>`).join('')}</tbody></table></div>`;
     });
   }
 
@@ -726,7 +771,7 @@
       })
       .withFailureHandler((error) => {
         setStatus('Error');
-        showMessage(error.message || 'Unable to bootstrap the app', 'error');
+        showMessage('Unable to load the app. Please try again or contact support.', 'error');
       })
       .getBootstrapData();
   }

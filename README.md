@@ -10,6 +10,12 @@ Interim student wellbeing and casework platform.
 - The Worker enforces permissions, filtering, visibility, redaction, audit logging, and Neon access.
 - Neon PostgreSQL remains the system of record.
 
+## UI Standard
+
+- The staff UI should stay compact, stable, and product-focused.
+- Avoid backend or deployment language in visible app copy.
+- Use skeleton loading inside data panels so page headers and filters do not jump while data loads.
+
 ## Key IDs
 
 - Apps Script project ID: `19EBgbNt3I_SEYaYEqr1NQEPtnvHlHH5QO3PsdgGlp2997nHoAmWgHOix`

@@ -47,3 +47,12 @@ On 2026-04-24 the Worker and Apps Script production deployment were deployed. `c
 - Extended follow-ups to carry visibility metadata and appear in the calendar alongside meetings.
 - Calendar/list views now expose assigned user, status, date, linked student, and item type where permitted.
 - PostgreSQL RLS remains deferred as a later hardening option rather than part of this beta pass.
+
+## UI Polish Follow-Up
+
+- Removed developer-facing UI language from the app shell, header, sidebar, dashboard, settings, audit, and loading/error states.
+- Compacted the shared page header so Dashboard, Students, Calendar, and Settings use a stable low-height header.
+- Improved student list density with a shorter directory panel, compact controls, denser rows, and table skeleton loading.
+- Changed Students filters to a Builder/Advanced mode pattern with active chips, clear filters, saved views, and an advanced filter input only when selected.
+- Slimmed Dashboard KPI tiles and replaced the dashboard filter examples panel with upcoming follow-ups visible to the signed-in user.
+- Kept Calendar and Settings compact with stable skeleton loading to reduce layout jump while data loads.

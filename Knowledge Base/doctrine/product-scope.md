@@ -13,6 +13,14 @@ This application is an interim student wellbeing and casework platform for schoo
 - Manage permissions, roles, teams, and cross-team visibility inside the app
 - Support secure filtered working views and saved views
 
+## UI Pattern
+
+- The Apps Script UI should feel like a compact internal SaaS tool, not a technical demo.
+- Page headers stay consistent and shallow so useful data appears above the fold.
+- Loading states should appear as stable skeletons inside data regions rather than resizing the whole page.
+- Staff-facing copy should use product language and avoid backend, API, deployment, or implementation wording.
+- Common list filters default to a friendly builder, with advanced filter input available only when the user switches modes.
+
 ## In Scope
 
 - Dashboard

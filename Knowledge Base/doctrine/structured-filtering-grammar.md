@@ -6,8 +6,9 @@ Provide URL-driven filtering across list screens and backend APIs without exposi
 
 ## UX Layers
 
-- Friendly filter builder for common staff workflows.
-- Advanced structured input for power users.
+- Friendly filter builder is the default for common staff workflows.
+- Advanced structured input is hidden until the user switches to Advanced mode.
+- Active filter chips remain visible in both modes.
 
 The friendly builder writes the same structured filter string used by the backend.
 

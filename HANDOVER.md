@@ -1,4 +1,4 @@
-# Beta Handover
+# Handover
 
 ## What Changed
 
@@ -9,6 +9,9 @@
 - Added persistent signed-request nonce replay protection.
 - Added automated Worker tests for permissions, redaction, structured filters, team visibility, and nonce replay.
 - Tightened the UI with compact headers, denser student table, friendly filter builder, calendar/list view, and Jira-style profile action bar.
+- Removed developer-facing wording from the staff UI and replaced large loading blocks with compact skeleton states.
+- Added Builder/Advanced mode switching for student filters while preserving URL-driven structured filtering behind the scenes.
+- Slimmed dashboard KPI cards and replaced dashboard filter examples with upcoming follow-ups for the signed-in user.
 - Removed the standalone Concerns navigation item; concerns are logged from the student profile.
 - Added migration `006_hybrid_beta_defaults.sql` for radar labels and caseworker student creation.
 - Added migration `007_beta_hardening_nonce_calendar.sql` for nonce persistence, action visibility, and calendar indexes.
@@ -23,9 +26,9 @@
 
 ## What Works
 
-- Bootstrap, dashboard, compact student list, student creation, student profile, inline casework actions, calendar/list meetings, settings, saved filters, and audit view are wired through the Worker API.
+- Bootstrap, dashboard, compact student list, student creation, student profile, inline support actions, calendar/list meetings, settings, saved filters, and audit view are wired through the Worker API.
 - Radar badges show active team involvement.
-- Structured filters remain URL-driven and backend-compiled.
+- Filters remain URL-driven and backend-compiled, with a friendly builder as the default staff experience.
 
 ## Remaining Incomplete
 
@@ -66,6 +69,8 @@ Local migration secret:
 - Open Apps Script as an authorised staff user.
 - Confirm bootstrap loads without exposing the Worker URL.
 - Search students and apply `radar==safeguarding`.
+- Toggle Students between Builder and Advanced filter modes.
+- Confirm Dashboard, Calendar, and Settings load without large layout jumps.
 - Create a student as a caseworker/admin.
 - Open a profile and add a note, meeting, concern, follow-up, radar, and status change.
 - Verify a lower-privilege user sees redacted or hidden data.
