@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApi, hmacHex, verifySignedAppsScriptRequest, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES } from '../worker/index.js';
+import { createApi, hmacHex, verifySignedAppsScriptRequest, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES, VALID_INCIDENT_TYPES, VALID_SANCTION_TYPES } from '../worker/index.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const SOURCE_TEAM = '22222222-2222-2222-2222-222222222222';
@@ -368,6 +368,37 @@ test('VALID_REFERRAL_TYPES export contains all expected agency keys', () => {
 test('VALID_SEND_CATEGORIES export covers all statutory categories', () => {
   const expected = ['none', 'sen_support', 'ehcp', 'assessed_no_need'];
   expected.forEach((key) => assert.ok(VALID_SEND_CATEGORIES.includes(key), key + ' missing from VALID_SEND_CATEGORIES'));
+});
+
+test('creating a concern with invalid incident_type is rejected', async () => {
+  const api = createApi(makeEnv({ permissions: ['concerns.create'] }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/concerns', method: 'post',
+      payload: { studentId: STUDENT_ID, category: 'behaviour', title: 'T', summary: 'S', incidentType: 'brawl' },
+    }),
+    /Invalid incident_type/
+  );
+});
+
+test('creating a concern with invalid sanction_type is rejected', async () => {
+  const api = createApi(makeEnv({ permissions: ['concerns.create'] }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/concerns', method: 'post',
+      payload: { studentId: STUDENT_ID, category: 'behaviour', title: 'T', summary: 'S', sanctionType: 'suspended' },
+    }),
+    /Invalid sanction_type/
+  );
+});
+
+test('VALID_INCIDENT_TYPES and VALID_SANCTION_TYPES exports are complete', () => {
+  ['verbal','physical','disruption','bullying','online','damage','substance','other'].forEach(
+    (key) => assert.ok(VALID_INCIDENT_TYPES.includes(key), key + ' missing')
+  );
+  ['none','verbal_warning','detention','isolation','ftes','managed_move','permanent_exclusion'].forEach(
+    (key) => assert.ok(VALID_SANCTION_TYPES.includes(key), key + ' missing')
+  );
 });
 
 test('signed request nonce cannot be replayed', async () => {

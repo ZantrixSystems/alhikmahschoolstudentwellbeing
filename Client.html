@@ -460,6 +460,32 @@
               <textarea id="concernReferralOutcome" class="span-2" rows="2" placeholder="Referral outcome / agency response (optional at this stage)"></textarea>
             </div>
           </div>
+          <div class="span-2" id="concernBehaviourFields" style="display:none">
+            <div class="form-grid">
+              <select id="concernIncidentType">
+                <option value="">Incident type</option>
+                <option value="verbal">Verbal abuse / aggression</option>
+                <option value="physical">Physical aggression</option>
+                <option value="disruption">Persistent disruption</option>
+                <option value="bullying">Bullying</option>
+                <option value="online">Online / cyberbullying</option>
+                <option value="damage">Property damage</option>
+                <option value="substance">Substance related</option>
+                <option value="other">Other</option>
+              </select>
+              <select id="concernSanctionType">
+                <option value="none">No sanction</option>
+                <option value="verbal_warning">Verbal warning</option>
+                <option value="detention">Detention</option>
+                <option value="isolation">Internal isolation</option>
+                <option value="ftes">Fixed-term exclusion</option>
+                <option value="managed_move">Managed move</option>
+                <option value="permanent_exclusion">Permanent exclusion</option>
+              </select>
+              <input id="concernSanctionDuration" placeholder="Sanction duration (e.g. 2 days)">
+              <label class="check-control"><input id="concernBehaviourPlanActive" type="checkbox"> Behaviour plan in place</label>
+            </div>
+          </div>
           <button class="button span-2" id="submitConcern">Log concern</button>
         </div>`,
       followup: `
@@ -549,12 +575,14 @@
     };
     const concernCategory = document.getElementById('concernCategory');
     const concernSafeguardingFields = document.getElementById('concernSafeguardingFields');
-    if (concernCategory && concernSafeguardingFields) {
-      const toggleSafeguarding = () => {
-        concernSafeguardingFields.style.display = concernCategory.value === 'safeguarding' ? '' : 'none';
+    const concernBehaviourFields = document.getElementById('concernBehaviourFields');
+    if (concernCategory) {
+      const toggleConcernFields = () => {
+        if (concernSafeguardingFields) concernSafeguardingFields.style.display = concernCategory.value === 'safeguarding' ? '' : 'none';
+        if (concernBehaviourFields) concernBehaviourFields.style.display = concernCategory.value === 'behaviour' ? '' : 'none';
       };
-      concernCategory.onchange = toggleSafeguarding;
-      toggleSafeguarding();
+      concernCategory.onchange = toggleConcernFields;
+      toggleConcernFields();
     }
     const submitConcern = document.getElementById('submitConcern');
     if (submitConcern) submitConcern.onclick = () => postProfile('/api/concerns', {
@@ -567,6 +595,10 @@
       referralType: document.getElementById('concernReferralType') ? document.getElementById('concernReferralType').value : null,
       referralDate: document.getElementById('concernReferralDate') ? document.getElementById('concernReferralDate').value : null,
       referralOutcome: document.getElementById('concernReferralOutcome') ? document.getElementById('concernReferralOutcome').value : null,
+      incidentType: document.getElementById('concernIncidentType') ? document.getElementById('concernIncidentType').value : null,
+      sanctionType: document.getElementById('concernSanctionType') ? document.getElementById('concernSanctionType').value : null,
+      sanctionDuration: document.getElementById('concernSanctionDuration') ? document.getElementById('concernSanctionDuration').value : null,
+      behaviourPlanActive: document.getElementById('concernBehaviourPlanActive') ? document.getElementById('concernBehaviourPlanActive').checked : false,
     });
     const submitFollow = document.getElementById('submitFollow');
     if (submitFollow) submitFollow.onclick = () => postProfile('/api/follow-ups', {

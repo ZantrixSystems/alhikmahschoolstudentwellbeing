@@ -4,6 +4,8 @@ const VALID_REFERRAL_TYPES = ['none', 'mash', 'lado', 'police', 'early_help', 'c
 const VALID_SEND_CATEGORIES = ['none', 'sen_support', 'ehcp', 'assessed_no_need'];
 const VALID_SEND_PLAN_TYPES = ['sen_support', 'ehcp', 'early_help'];
 const VALID_SEND_PLAN_STATUSES = ['active', 'under_review', 'closed'];
+const VALID_INCIDENT_TYPES = ['verbal','physical','disruption','bullying','online','damage','substance','other'];
+const VALID_SANCTION_TYPES = ['none','verbal_warning','detention','isolation','ftes','managed_move','permanent_exclusion'];
 
 class AppError extends Error {
   constructor(message, statusCode = 400, details = null) {
@@ -810,6 +812,14 @@ function createApi(env, actorEmail) {
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
       throw new AppError('Invalid referral_type: ' + referralType);
     }
+    const incidentType = body.incidentType || null;
+    if (incidentType && !VALID_INCIDENT_TYPES.includes(incidentType)) {
+      throw new AppError('Invalid incident_type: ' + incidentType);
+    }
+    const sanctionType = body.sanctionType || null;
+    if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) {
+      throw new AppError('Invalid sanction_type: ' + sanctionType);
+    }
     // Safeguarding concerns must be marked confidential
     const confidentialityLevel = body.category === 'safeguarding' ? 'safeguarding' : (body.confidentialityLevel || 'summary');
     const concern = await queryOne(
@@ -817,14 +827,16 @@ function createApi(env, actorEmail) {
         'INSERT INTO concerns',
         '  (student_id, concern_ref, team_id, submitted_by_user_id, category, severity, urgency,',
         '   confidentiality_level, title, summary, detail, referral_type, referral_date, referral_outcome,',
+        '   incident_type, sanction_type, sanction_duration, behaviour_plan_active,',
         '   created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $4, $4) RETURNING *',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $4, $4) RETURNING *',
       ].join('\n'),
       [
         body.studentId, 'CON-' + Date.now(), body.teamId || null, auth.userId,
         body.category, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
         body.title, body.summary, body.detail || null,
         referralType, body.referralDate || null, body.referralOutcome || null,
+        incidentType, sanctionType, body.sanctionDuration || null, body.behaviourPlanActive === true,
       ]
     );
     const visibilityLevel = body.category === 'safeguarding' ? 'summary' : 'summary';
@@ -1168,4 +1180,6 @@ export {
   workerQuery,
   VALID_REFERRAL_TYPES,
   VALID_SEND_CATEGORIES,
+  VALID_INCIDENT_TYPES,
+  VALID_SANCTION_TYPES,
 };
