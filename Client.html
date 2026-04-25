@@ -481,7 +481,19 @@
     callServer({ path, method: 'post', payload }).then(() => {
       showMessage('Profile updated.');
       state.activeProfileAction = '';
-      renderStudentProfilePage();
+      document.getElementById('profileActionHost').innerHTML = '';
+      Array.from(document.querySelectorAll('[data-profile-action]')).forEach((btn) => {
+        btn.className = 'button secondary';
+        btn.disabled = false;
+      });
+      return callServer({ path: '/api/students/' + encodeURIComponent(state.route.studentId), method: 'get' });
+    }).then((data) => {
+      if (!data) return;
+      state.profileData = data;
+      const timeline = document.querySelector('.timeline');
+      if (timeline) timeline.innerHTML = buildTimeline(data);
+      const radarRow = document.querySelector('.profile-heading .badge-row');
+      if (radarRow) radarRow.innerHTML = (data.radar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map(radarBadge).join('') || '<span class="muted small">No active radar</span>';
     }).finally(() => {
       state.profileSaving = false;
     });
@@ -583,7 +595,11 @@
       Array.from(document.querySelectorAll('[data-profile-action]')).forEach((button) => {
         button.onclick = () => {
           state.activeProfileAction = state.activeProfileAction === button.dataset.profileAction ? '' : button.dataset.profileAction;
-          renderStudentProfilePage();
+          Array.from(document.querySelectorAll('[data-profile-action]')).forEach((btn) => {
+            btn.className = 'button ' + (state.activeProfileAction === btn.dataset.profileAction ? '' : 'secondary');
+          });
+          document.getElementById('profileActionHost').innerHTML = profileActionForm(state.activeProfileAction, state.profileData);
+          bindProfileActionHandlers();
         };
       });
       bindProfileActionHandlers();
@@ -733,13 +749,13 @@
 
   function bindSettingsForms() {
     const saveUserButton = document.getElementById('saveUserButton');
-    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => { showMessage('User saved.'); renderSettingsPage(); });
+    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => showMessage('User saved.'));
     const saveRoleButton = document.getElementById('saveRoleButton');
-    if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { showMessage('Role saved.'); renderSettingsPage(); });
+    if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => showMessage('Role saved.'));
     const saveTeamButton = document.getElementById('saveTeamButton');
-    if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { showMessage('Team saved.'); renderSettingsPage(); });
+    if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => showMessage('Team saved.'));
     const saveVisibilityButton = document.getElementById('saveVisibilityButton');
-    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { showMessage('Visibility rule saved.'); renderSettingsPage(); });
+    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => showMessage('Visibility rule saved.'));
   }
 
   function loadAuditLog() {

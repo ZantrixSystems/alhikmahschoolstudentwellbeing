@@ -1,4 +1,7 @@
+let workerConfigCache_ = null;
+
 function getWorkerConfig_() {
+  if (workerConfigCache_) return workerConfigCache_;
   const properties = PropertiesService.getScriptProperties();
   const workerUrl = properties.getProperty('WORKER_API_URL');
   const sharedSecret = properties.getProperty('WORKER_SHARED_SECRET');
@@ -8,11 +11,12 @@ function getWorkerConfig_() {
     throw new Error('Missing Worker bridge settings. Set WORKER_API_URL and WORKER_SHARED_SECRET in Apps Script script properties.');
   }
 
-  return {
+  workerConfigCache_ = {
     workerUrl: workerUrl.replace(/\/+$/, ''),
     sharedSecret: sharedSecret,
     keyId: keyId,
   };
+  return workerConfigCache_;
 }
 
 function include(filename) {
