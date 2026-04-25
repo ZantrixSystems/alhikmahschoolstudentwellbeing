@@ -278,6 +278,7 @@
         <div class="filter-switch">
           <div class="chip-row" id="studentFilterChips">${renderFilterChips(state.route.filter)}</div>
           <div class="filter-mode-actions">
+            ${savedOptions ? `<select id="builderSavedFilter" class="saved-filter-select"><option value="">Saved filters</option>${savedOptions}</select>` : ''}
             <label class="check-control"><input id="filterOpenFollowUp" type="checkbox"> Open follow-up</label>
             <button class="text-button" id="clearStudentFilters">Clear</button>
           </div>
@@ -315,6 +316,10 @@
       });
     };
     document.getElementById('clearStudentFilters').onclick = () => updateRoute({ page: 'students', q: '', filter: '', filterMode: 'builder' });
+    const builderSaved = document.getElementById('builderSavedFilter');
+    if (builderSaved) builderSaved.onchange = (event) => {
+      if (event.target.value) updateRoute({ page: 'students', filter: event.target.value, filterMode: 'builder' });
+    };
     const createButton = document.getElementById('createStudentButton');
     if (createButton) {
       createButton.onclick = () => {
