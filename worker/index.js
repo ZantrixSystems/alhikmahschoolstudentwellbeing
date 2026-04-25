@@ -1,5 +1,9 @@
 const VISIBILITY_LEVELS = ['none', 'indicator', 'summary', 'full'];
 const FILTER_OPERATORS = ['=isnull=', '=in=', '=out=', '~=', '==', '!=', '>=', '<=', '>', '<'];
+const VALID_REFERRAL_TYPES = ['none', 'mash', 'lado', 'police', 'early_help', 'camhs', 'social_care', 'other'];
+const VALID_SEND_CATEGORIES = ['none', 'sen_support', 'ehcp', 'assessed_no_need'];
+const VALID_SEND_PLAN_TYPES = ['sen_support', 'ehcp', 'early_help'];
+const VALID_SEND_PLAN_STATUSES = ['active', 'under_review', 'closed'];
 
 class AppError extends Error {
   constructor(message, statusCode = 400, details = null) {
@@ -500,8 +504,16 @@ function createApi(env, actorEmail) {
     if (visibility === 'full') return { ...record, visibility };
     if (visibility === 'summary') {
       const redacted = { ...record, visibility };
+      // Operational detail fields — strip at summary level
       delete redacted.detail;
       delete redacted.body;
+      // Referral specifics are full-visibility-only; show only type at summary
+      delete redacted.referral_outcome;
+      delete redacted.referral_date;
+      delete redacted.outcome_summary;
+      delete redacted.closed_by_name;
+      delete redacted.external_contact_name;
+      delete redacted.external_ref;
       return redacted;
     }
     if (visibility === 'indicator') {
@@ -578,6 +590,9 @@ function createApi(env, actorEmail) {
 
   async function getDashboardPayload(auth) {
     await assertPermission(auth, 'dashboard.view');
+    const permissionKeys = await getEffectivePermissionKeys(auth);
+    const canReviewConcerns = auth.isAdmin || permissionKeys.includes('concerns.review');
+
     const [headline, teamLoad] = await Promise.all([
       queryOne(
         [
@@ -599,7 +614,31 @@ function createApi(env, actorEmail) {
         ].join('\n')
       ),
     ]);
-    return { headline, teamLoad };
+
+    // DSL safeguarding panel: open/triage/escalated safeguarding concerns
+    // Only fetched when the user has concerns.review — no data leaks to non-DSL staff.
+    let openSafeguardingConcerns = [];
+    if (canReviewConcerns) {
+      openSafeguardingConcerns = await query(
+        [
+          'SELECT c.id, c.student_id, s.first_name, s.last_name, s.student_code, s.year_group,',
+          '  c.title, c.status, c.severity, c.urgency, c.category, c.referral_type,',
+          '  c.created_at, c.updated_at, c.occurred_at,',
+          '  t.name AS team_name, u.display_name AS submitted_by_name',
+          'FROM concerns c',
+          'JOIN students s ON s.id = c.student_id AND s.deleted_at IS NULL',
+          'LEFT JOIN teams t ON t.id = c.team_id',
+          'LEFT JOIN users u ON u.id = c.submitted_by_user_id',
+          "WHERE c.deleted_at IS NULL AND c.category = 'safeguarding'",
+          "  AND c.status IN ('open', 'triage', 'escalated')",
+          "ORDER BY CASE c.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,",
+          '  c.updated_at DESC',
+          'LIMIT 30',
+        ].join('\n')
+      );
+    }
+
+    return { headline, teamLoad, openSafeguardingConcerns };
   }
 
   async function getStudentsPayload(auth, requestQuery) {
@@ -698,12 +737,58 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       [studentId]
     );
-    const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw] = await Promise.all([
-      canReviewConcerns ? query('SELECT c.id, c.team_id, t.name AS team_name, c.title, c.summary, c.detail, c.status, c.category, c.severity, c.confidentiality_level, c.created_at, c.created_at AS occurred_at FROM concerns c LEFT JOIN teams t ON t.id = c.team_id WHERE c.student_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at DESC', [studentId]) : [],
-      canViewMeetings ? query('SELECT m.id, m.team_id, t.name AS team_name, m.title, m.summary, m.detail, m.interaction_type, m.visibility_level, m.occurred_at, m.created_at, m.occurred_at AS calendar_at, u.display_name AS assigned_user_name FROM meetings m LEFT JOIN teams t ON t.id = m.team_id LEFT JOIN users u ON u.id = m.logged_by_user_id WHERE m.student_id = $1 AND m.deleted_at IS NULL ORDER BY m.occurred_at DESC', [studentId]) : [],
+    const canManageSend = auth.isAdmin || permissionKeys.includes('send.manage');
+
+    const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw, activeSendPlan] = await Promise.all([
+      canReviewConcerns ? query(
+        [
+          'SELECT c.id, c.team_id, t.name AS team_name, c.title, c.summary, c.detail,',
+          '  c.status, c.category, c.severity, c.urgency, c.confidentiality_level,',
+          '  c.outcome_summary, c.referral_type, c.referral_date, c.referral_outcome,',
+          '  c.closed_at, c.created_at, c.created_at AS occurred_at,',
+          '  closed_by.display_name AS closed_by_name',
+          'FROM concerns c',
+          'LEFT JOIN teams t ON t.id = c.team_id',
+          'LEFT JOIN users closed_by ON closed_by.id = c.closed_by_user_id',
+          'WHERE c.student_id = $1 AND c.deleted_at IS NULL',
+          'ORDER BY c.created_at DESC',
+        ].join('\n'), [studentId]) : [],
+      canViewMeetings ? query(
+        [
+          'SELECT m.id, m.team_id, t.name AS team_name, m.title, m.summary, m.detail,',
+          '  m.interaction_type, m.visibility_level, m.occurred_at, m.created_at,',
+          '  m.occurred_at AS calendar_at, m.external_agency, m.external_contact_name, m.external_ref,',
+          '  u.display_name AS assigned_user_name',
+          'FROM meetings m',
+          'LEFT JOIN teams t ON t.id = m.team_id',
+          'LEFT JOIN users u ON u.id = m.logged_by_user_id',
+          'WHERE m.student_id = $1 AND m.deleted_at IS NULL',
+          'ORDER BY m.occurred_at DESC',
+        ].join('\n'), [studentId]) : [],
       canManageActions ? query('SELECT a.id, a.team_id, t.name AS team_name, a.title, a.summary, a.status, a.priority, a.due_at, a.completed_at, a.created_at, COALESCE(a.due_at, a.created_at) AS occurred_at, a.due_at AS calendar_at, COALESCE(a.visibility_level, \'summary\') AS visibility_level, u.display_name AS assigned_user_name FROM actions a LEFT JOIN teams t ON t.id = a.team_id LEFT JOIN users u ON u.id = a.owner_user_id WHERE a.student_id = $1 AND a.deleted_at IS NULL ORDER BY COALESCE(a.due_at, a.created_at) DESC', [studentId]) : [],
       canViewNotes ? query('SELECT n.id, n.team_id, t.name AS team_name, n.summary AS title, n.summary, n.body, n.note_type, n.visibility_level, n.created_at, n.created_at AS occurred_at FROM notes n LEFT JOIN teams t ON t.id = n.team_id WHERE n.student_id = $1 AND n.deleted_at IS NULL ORDER BY n.created_at DESC', [studentId]) : [],
-      canViewChronology ? query('SELECT ce.id, ce.source_table, ce.source_id, ce.team_id, t.name AS team_name, ce.title, ce.summary, ce.detail, ce.event_type, ce.visibility_level, ce.occurred_at, ce.created_at FROM chronology_events ce LEFT JOIN teams t ON t.id = ce.team_id WHERE ce.student_id = $1 AND ce.deleted_at IS NULL ORDER BY ce.occurred_at DESC LIMIT 100', [studentId]) : [],
+      canViewChronology ? query(
+        [
+          'SELECT ce.id, ce.source_table, ce.source_id, ce.team_id, t.name AS team_name,',
+          '  ce.title, ce.summary, ce.detail, ce.event_type, ce.visibility_level,',
+          '  ce.action_taken, ce.outcome, ce.next_step, ce.next_step_due,',
+          '  nso.display_name AS next_step_owner_name,',
+          '  ce.occurred_at, ce.created_at',
+          'FROM chronology_events ce',
+          'LEFT JOIN teams t ON t.id = ce.team_id',
+          'LEFT JOIN users nso ON nso.id = ce.next_step_owner_id',
+          'WHERE ce.student_id = $1 AND ce.deleted_at IS NULL',
+          'ORDER BY ce.occurred_at DESC LIMIT 100',
+        ].join('\n'), [studentId]) : [],
+      canManageSend ? queryOne(
+        [
+          'SELECT sp.id, sp.plan_type, sp.plan_ref, sp.ehcp_annual_review_date,',
+          '  sp.identified_needs, sp.planned_provision, sp.review_date, sp.review_outcome,',
+          '  sp.external_agency, sp.specialist_name, sp.status, sp.created_at, sp.updated_at',
+          'FROM send_plans sp',
+          "WHERE sp.student_id = $1 AND sp.deleted_at IS NULL AND sp.status IN ('active','under_review')",
+          'ORDER BY sp.created_at DESC LIMIT 1',
+        ].join('\n'), [studentId]) : null,
     ]);
     await writeAuditLog(auth, { areaKey: 'students', actionKey: 'profile.view', entityType: 'student', entityId: studentId, studentId, metadata: { sensitiveRead: true } });
     return {
@@ -714,21 +799,120 @@ function createApi(env, actorEmail) {
       actions: applyVisibility(auth, matrix, actionsRaw, 'actions', 'visibility_level'),
       notes: applyVisibility(auth, matrix, notesRaw, 'chronology', 'visibility_level'),
       chronology: applyVisibility(auth, matrix, chronologyRaw, 'chronology', 'visibility_level'),
+      activeSendPlan: activeSendPlan || null,
     };
   }
 
   async function createConcern(auth, body) {
     await assertPermission(auth, 'concerns.create');
     if (!body.studentId || !body.category || !body.title || !body.summary) throw new AppError('studentId, category, title, and summary are required');
+    const referralType = body.referralType || null;
+    if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
+      throw new AppError('Invalid referral_type: ' + referralType);
+    }
+    // Safeguarding concerns must be marked confidential
+    const confidentialityLevel = body.category === 'safeguarding' ? 'safeguarding' : (body.confidentialityLevel || 'summary');
     const concern = await queryOne(
       [
-        'INSERT INTO concerns (student_id, concern_ref, team_id, submitted_by_user_id, category, severity, urgency, confidentiality_level, title, summary, detail, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $4, $4) RETURNING *',
+        'INSERT INTO concerns',
+        '  (student_id, concern_ref, team_id, submitted_by_user_id, category, severity, urgency,',
+        '   confidentiality_level, title, summary, detail, referral_type, referral_date, referral_outcome,',
+        '   created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $4, $4) RETURNING *',
       ].join('\n'),
-      [body.studentId, 'CON-' + Date.now(), body.teamId || null, auth.userId, body.category, body.severity || 'medium', body.urgency || 'standard', body.confidentialityLevel || 'summary', body.title, body.summary, body.detail || null]
+      [
+        body.studentId, 'CON-' + Date.now(), body.teamId || null, auth.userId,
+        body.category, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
+        body.title, body.summary, body.detail || null,
+        referralType, body.referralDate || null, body.referralOutcome || null,
+      ]
     );
-    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, 'summary');
+    const visibilityLevel = body.category === 'safeguarding' ? 'summary' : 'summary';
+    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, visibilityLevel, null, null, null, null, null);
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { category: body.category, severity: body.severity } });
     return { concern };
+  }
+
+  async function closeConcern(auth, concernId, body) {
+    await assertPermission(auth, 'concerns.close');
+    if (!body.outcomeSummary || !String(body.outcomeSummary).trim()) {
+      throw new AppError('outcomeSummary is required when closing a concern');
+    }
+    const existing = await queryOne('SELECT * FROM concerns WHERE id = $1 AND deleted_at IS NULL', [concernId]);
+    if (!existing) throw new AppError('Concern not found', 404);
+    if (existing.status === 'closed') throw new AppError('Concern is already closed', 400);
+
+    // Append to escalation_log so the transition to closed is permanently recorded.
+    const logEntry = {
+      actor_user_id: auth.userId,
+      timestamp: new Date().toISOString(),
+      from_status: existing.status,
+      to_status: 'closed',
+      note: body.closureNote || null,
+    };
+    const concern = await queryOne(
+      [
+        'UPDATE concerns SET',
+        "  status = 'closed',",
+        '  outcome_summary = $1,',
+        '  closed_by_user_id = $2,',
+        '  closed_at = NOW(),',
+        '  escalation_log = escalation_log || $3::jsonb,',
+        '  updated_at = NOW(), updated_by = $2',
+        'WHERE id = $4 AND deleted_at IS NULL RETURNING *',
+      ].join('\n'),
+      [body.outcomeSummary, auth.userId, JSON.stringify([logEntry]), concernId]
+    );
+    await addChronology(
+      auth, existing.student_id, 'concerns', concernId, 'concern_logged',
+      existing.team_id,
+      'Concern closed: ' + existing.title,
+      body.outcomeSummary,
+      body.closureNote || null,
+      'summary',
+      null,
+      null, body.outcomeSummary, null, null
+    );
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'close', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { previousStatus: existing.status } });
+    return { concern };
+  }
+
+  async function createSendPlan(auth, body) {
+    await assertPermission(auth, 'send.manage');
+    if (!body.studentId || !body.planType) throw new AppError('studentId and planType are required');
+    if (!VALID_SEND_PLAN_TYPES.includes(body.planType)) throw new AppError('Invalid planType: ' + body.planType);
+    // Close any existing active plan before creating a new one
+    await query(
+      "UPDATE send_plans SET status = 'closed', updated_at = NOW(), updated_by = $1 WHERE student_id = $2 AND status IN ('active','under_review') AND deleted_at IS NULL",
+      [auth.userId, body.studentId]
+    );
+    const plan = await queryOne(
+      [
+        'INSERT INTO send_plans',
+        '  (student_id, plan_type, plan_ref, ehcp_annual_review_date, identified_needs,',
+        '   planned_provision, review_date, review_outcome, external_agency, specialist_name,',
+        '   status, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12) RETURNING *',
+      ].join('\n'),
+      [
+        body.studentId, body.planType, body.planRef || null,
+        body.ehcpAnnualReviewDate || null, body.identifiedNeeds || null,
+        body.plannedProvision || null, body.reviewDate || null,
+        body.reviewOutcome || null, body.externalAgency || null,
+        body.specialistName || null,
+        body.status && VALID_SEND_PLAN_STATUSES.includes(body.status) ? body.status : 'active',
+        auth.userId,
+      ]
+    );
+    // Update student send_category to match plan type if not already more specific
+    if (body.planType === 'ehcp') {
+      await query('UPDATE students SET send_category = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3 AND send_category != $1', ['ehcp', auth.userId, body.studentId]);
+    } else if (body.planType === 'sen_support') {
+      await query("UPDATE students SET send_category = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3 AND send_category = 'none'", ['sen_support', auth.userId, body.studentId]);
+    }
+    await addChronology(auth, body.studentId, 'send_plans', plan.id, 'review_held', null, 'SEND plan created: ' + body.planType, body.identifiedNeeds || 'SEND plan recorded.', null, 'summary');
+    await writeAuditLog(auth, { areaKey: 'send', actionKey: 'plan.create', entityType: 'send_plan', entityId: plan.id, studentId: body.studentId, metadata: { planType: body.planType } });
+    return { plan };
   }
 
   async function createMeeting(auth, body) {
@@ -736,12 +920,21 @@ function createApi(env, actorEmail) {
     if (!body.studentId || !body.interactionType || !body.title || !body.summary || !body.occurredAt) throw new AppError('studentId, interactionType, title, summary, and occurredAt are required');
     const meeting = await queryOne(
       [
-        'INSERT INTO meetings (student_id, team_id, logged_by_user_id, interaction_type, visibility_level, confidentiality_level, title, summary, detail, occurred_at, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $3, $3) RETURNING *',
+        'INSERT INTO meetings',
+        '  (student_id, team_id, logged_by_user_id, interaction_type, visibility_level, confidentiality_level,',
+        '   title, summary, detail, occurred_at, external_agency, external_contact_name, external_ref,',
+        '   created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $3, $3) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, auth.userId, body.interactionType, body.visibilityLevel || 'summary', body.confidentialityLevel || 'summary', body.title, body.summary, body.detail || null, body.occurredAt]
+      [
+        body.studentId, body.teamId || null, auth.userId,
+        body.interactionType, body.visibilityLevel || 'summary', body.confidentialityLevel || 'summary',
+        body.title, body.summary, body.detail || null, body.occurredAt,
+        body.externalAgency || null, body.externalContactName || null, body.externalRef || null,
+      ]
     );
-    await addChronology(auth, body.studentId, 'meetings', meeting.id, 'meeting_logged', body.teamId, body.title, body.summary, body.detail, body.visibilityLevel || 'summary', body.occurredAt);
+    const eventType = body.externalAgency && body.externalAgency !== '' ? 'external_agency_contact' : 'meeting_logged';
+    await addChronology(auth, body.studentId, 'meetings', meeting.id, eventType, body.teamId, body.title, body.summary, body.detail, body.visibilityLevel || 'summary', body.occurredAt);
     return { meeting };
   }
 
@@ -795,13 +988,17 @@ function createApi(env, actorEmail) {
     return { radar };
   }
 
-  async function addChronology(auth, studentId, sourceTable, sourceId, eventType, teamId, title, summary, detail, visibilityLevel, occurredAt = null) {
+  async function addChronology(auth, studentId, sourceTable, sourceId, eventType, teamId, title, summary, detail, visibilityLevel, occurredAt = null, actionTaken = null, outcome = null, nextStep = null, nextStepDue = null) {
     await query(
       [
-        'INSERT INTO chronology_events (student_id, source_table, source_id, event_type, team_id, actor_user_id, visibility_level, confidentiality_level, title, summary, detail, occurred_at, created_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW()), $6)',
+        'INSERT INTO chronology_events',
+        '  (student_id, source_table, source_id, event_type, team_id, actor_user_id,',
+        '   visibility_level, confidentiality_level, title, summary, detail,',
+        '   action_taken, outcome, next_step, next_step_due,',
+        '   occurred_at, created_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, COALESCE($16::timestamptz, NOW()), $6)',
       ].join('\n'),
-      [studentId, sourceTable, sourceId, eventType, teamId || null, auth.userId, visibilityLevel || 'summary', 'summary', title, summary, detail || null, occurredAt]
+      [studentId, sourceTable, sourceId, eventType, teamId || null, auth.userId, visibilityLevel || 'summary', 'summary', title, summary, detail || null, actionTaken || null, outcome || null, nextStep || null, nextStepDue || null, occurredAt]
     );
   }
 
@@ -936,6 +1133,8 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/students') return createStudent(auth, payload);
     if (method === 'get' && /^\/api\/students\/[^/]+$/.test(path)) return getStudentProfilePayload(auth, path.split('/')[3]);
     if (method === 'post' && path === '/api/concerns') return createConcern(auth, payload);
+    if (method === 'post' && /^\/api\/concerns\/[^/]+\/close$/.test(path)) return closeConcern(auth, path.split('/')[3], payload);
+    if (method === 'post' && path === '/api/send-plans') return createSendPlan(auth, payload);
     if (method === 'get' && path === '/api/meetings') return getMeetingsPayload(auth, requestQuery);
     if (method === 'post' && path === '/api/meetings') return createMeeting(auth, payload);
     if (method === 'post' && path === '/api/notes') return createNote(auth, payload);
@@ -967,4 +1166,6 @@ export {
   timingSafeEqual,
   verifySignedAppsScriptRequest,
   workerQuery,
+  VALID_REFERRAL_TYPES,
+  VALID_SEND_CATEGORIES,
 };

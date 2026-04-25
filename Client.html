@@ -161,6 +161,7 @@
   function renderDashboard() {
     setPageTitle('Dashboard');
     const target = document.getElementById('dashboardPage');
+    const showSafeguardingPanel = hasPermission('concerns.review');
     target.innerHTML = `
       <section class="grid-cards compact-metrics" id="headlineCards">${skeletonCards(4)}</section>
       <section class="two-col">
@@ -183,6 +184,16 @@
           <div id="dashboardUpcoming" class="list compact-list">${skeletonRows(4)}</div>
         </article>
       </section>
+      ${showSafeguardingPanel ? `
+      <section class="panel compact-panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow safeguarding-eyebrow">Safeguarding</p>
+            <h3 class="section-title">Open Concerns</h3>
+          </div>
+        </div>
+        <div id="dslConcernList" class="list compact-list">${skeletonRows(4)}</div>
+      </section>` : ''}
     `;
 
     callServer({ path: '/api/dashboard', method: 'get' }).then((data) => {
@@ -208,6 +219,27 @@
             <span class="badge blue">${escapeHtml(team.active_students)} active</span>
           </header>
         </article>`).join('');
+
+      const dslList = document.getElementById('dslConcernList');
+      if (dslList) {
+        const concerns = data.openSafeguardingConcerns || [];
+        dslList.innerHTML = concerns.map((c) => `
+          <article class="list-row compact-row" data-student-link="${c.student_id}">
+            <header>
+              <div>
+                <h4>${escapeHtml(c.title)}</h4>
+                <p class="muted">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)} | ${escapeHtml(c.student_code)} | Y${escapeHtml(c.year_group || '?')}</p>
+              </div>
+              <div style="display:flex;gap:4px;align-items:center">
+                ${concernStatusBadge(c.status)}
+                <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
+              </div>
+            </header>
+            ${c.referral_type && c.referral_type !== 'none' ? `<p class="muted small">Referral: ${escapeHtml(c.referral_type.toUpperCase())}</p>` : ''}
+            <p class="muted small">${escapeHtml(c.submitted_by_name || 'Unknown')} | ${escapeHtml(c.team_name || 'No team')} | ${escapeHtml(formatDate(c.updated_at, true))}</p>
+          </article>`).join('') || '<p class="muted">No open safeguarding concerns.</p>';
+        bindStudentLinks();
+      }
     });
     if (hasPermission('meetings.view')) {
       callServer({ path: '/api/meetings', method: 'get', query: { filter: 'type==follow_up;status=in=(open,in_progress)' } }).then((data) => {
@@ -383,9 +415,26 @@
         <div class="form-grid">
           <input id="meetingTitle" placeholder="Meeting title">
           <input id="meetingOccurredAt" type="datetime-local">
-          <select id="meetingType"><option value="student_check_in">Student check-in</option><option value="parent_contact">Parent contact</option><option value="review_meeting">Review meeting</option></select>
+          <select id="meetingType"><option value="student_check_in">Student check-in</option><option value="parent_contact">Parent contact</option><option value="review_meeting">Review meeting</option><option value="external_agency">External agency</option><option value="team_around_family">Team around family</option></select>
           <select id="meetingTeam"><option value="">No team</option>${teams}</select>
           <textarea id="meetingSummary" class="span-2" rows="3" placeholder="Shareable summary"></textarea>
+          <div class="span-2" id="meetingExternalFields" style="display:none">
+            <div class="form-grid">
+              <select id="meetingExternalAgency">
+                <option value="">Select agency</option>
+                <option value="mash">MASH</option>
+                <option value="camhs">CAMHS</option>
+                <option value="social_care">Social care</option>
+                <option value="early_help">Early help</option>
+                <option value="police">Police</option>
+                <option value="lado">LADO</option>
+                <option value="educational_psychologist">Ed. psychologist</option>
+                <option value="other">Other</option>
+              </select>
+              <input id="meetingExternalContact" placeholder="Contact name (optional)">
+              <input id="meetingExternalRef" class="span-2" placeholder="Case / reference number (optional)">
+            </div>
+          </div>
           <button class="button span-2" id="submitMeeting">Log meeting</button>
         </div>`,
       concern: `
@@ -395,6 +444,22 @@
           <select id="concernSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
           <select id="concernTeam"><option value="">No team</option>${teams}</select>
           <textarea id="concernSummary" class="span-2" rows="3" placeholder="Short operational summary"></textarea>
+          <div class="span-2" id="concernSafeguardingFields" style="display:none">
+            <div class="form-grid">
+              <select id="concernReferralType">
+                <option value="none">No referral made</option>
+                <option value="mash">MASH referral</option>
+                <option value="lado">LADO referral</option>
+                <option value="police">Police</option>
+                <option value="early_help">Early help</option>
+                <option value="camhs">CAMHS</option>
+                <option value="social_care">Social care</option>
+                <option value="other">Other</option>
+              </select>
+              <input id="concernReferralDate" type="date" title="Referral date">
+              <textarea id="concernReferralOutcome" class="span-2" rows="2" placeholder="Referral outcome / agency response (optional at this stage)"></textarea>
+            </div>
+          </div>
           <button class="button span-2" id="submitConcern">Log concern</button>
         </div>`,
       followup: `
@@ -421,6 +486,31 @@
           <select id="studentStatus" class="span-2"><option value="active">Active</option><option value="monitoring">Monitoring</option><option value="closed">Closed</option><option value="archived">Archived</option></select>
           <button class="button span-2" id="submitStatus">Update status</button>
         </div>`,
+      closeconcern: (() => {
+        const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
+        if (!openConcerns.length) return '<p class="muted small">No open concerns to close.</p>';
+        const options = openConcerns.map((c) => `<option value="${escapeHtml(c.id)}">[${escapeHtml(c.severity)}] ${escapeHtml(c.title)} — ${escapeHtml(friendlyLabel(c.status))}</option>`).join('');
+        return `
+          <div class="form-grid">
+            <select id="closeConcernId" class="span-2">${options}</select>
+            <textarea id="closeConcernOutcome" class="span-2" rows="3" placeholder="Outcome summary — required. What was decided? What action was taken?"></textarea>
+            <textarea id="closeConcernNote" class="span-2" rows="2" placeholder="Closure note (optional)"></textarea>
+            <button class="button span-2" id="submitCloseConcern">Close concern</button>
+          </div>`;
+      })(),
+      sendplan: `
+        <div class="form-grid">
+          <select id="sendPlanType"><option value="sen_support">SEN Support</option><option value="ehcp">EHCP</option><option value="early_help">Early Help</option></select>
+          <select id="sendPlanStatus"><option value="active">Active</option><option value="under_review">Under review</option></select>
+          <input id="sendPlanRef" placeholder="Plan / EHCP ref (optional)">
+          <input id="sendReviewDate" type="date" title="Next review date">
+          <input id="sendEhcpReviewDate" type="date" title="EHCP annual review date (if applicable)">
+          <input id="sendSpecialist" placeholder="Specialist name (optional)">
+          <input id="sendExternalAgency" class="span-2" placeholder="External agency involved (optional)">
+          <textarea id="sendNeeds" class="span-2" rows="2" placeholder="Identified needs"></textarea>
+          <textarea id="sendProvision" class="span-2" rows="2" placeholder="Planned provision"></textarea>
+          <button class="button span-2" id="submitSendPlan">Save SEND plan</button>
+        </div>`,
     };
     return forms[action] ? `<section class="panel inline-action-panel">${forms[action]}</section>` : '';
   }
@@ -433,15 +523,39 @@
       body: document.getElementById('noteBody').value,
       teamId: document.getElementById('noteTeam').value,
     });
+    const meetingType = document.getElementById('meetingType');
+    const meetingExternalFields = document.getElementById('meetingExternalFields');
+    if (meetingType && meetingExternalFields) {
+      const toggleExternal = () => {
+        meetingExternalFields.style.display = meetingType.value === 'external_agency' ? '' : 'none';
+      };
+      meetingType.onchange = toggleExternal;
+      toggleExternal();
+    }
     const submitMeeting = document.getElementById('submitMeeting');
-    if (submitMeeting) submitMeeting.onclick = () => postProfile('/api/meetings', {
-      studentId: state.route.studentId,
-      title: document.getElementById('meetingTitle').value,
-      interactionType: document.getElementById('meetingType').value,
-      summary: document.getElementById('meetingSummary').value,
-      occurredAt: document.getElementById('meetingOccurredAt').value || new Date().toISOString(),
-      teamId: document.getElementById('meetingTeam').value,
-    });
+    if (submitMeeting) submitMeeting.onclick = () => {
+      const extAgency = document.getElementById('meetingExternalAgency');
+      postProfile('/api/meetings', {
+        studentId: state.route.studentId,
+        title: document.getElementById('meetingTitle').value,
+        interactionType: document.getElementById('meetingType').value,
+        summary: document.getElementById('meetingSummary').value,
+        occurredAt: document.getElementById('meetingOccurredAt').value || new Date().toISOString(),
+        teamId: document.getElementById('meetingTeam').value,
+        externalAgency: extAgency ? extAgency.value : '',
+        externalContactName: document.getElementById('meetingExternalContact') ? document.getElementById('meetingExternalContact').value : '',
+        externalRef: document.getElementById('meetingExternalRef') ? document.getElementById('meetingExternalRef').value : '',
+      });
+    };
+    const concernCategory = document.getElementById('concernCategory');
+    const concernSafeguardingFields = document.getElementById('concernSafeguardingFields');
+    if (concernCategory && concernSafeguardingFields) {
+      const toggleSafeguarding = () => {
+        concernSafeguardingFields.style.display = concernCategory.value === 'safeguarding' ? '' : 'none';
+      };
+      concernCategory.onchange = toggleSafeguarding;
+      toggleSafeguarding();
+    }
     const submitConcern = document.getElementById('submitConcern');
     if (submitConcern) submitConcern.onclick = () => postProfile('/api/concerns', {
       studentId: state.route.studentId,
@@ -450,6 +564,9 @@
       severity: document.getElementById('concernSeverity').value,
       summary: document.getElementById('concernSummary').value,
       teamId: document.getElementById('concernTeam').value,
+      referralType: document.getElementById('concernReferralType') ? document.getElementById('concernReferralType').value : null,
+      referralDate: document.getElementById('concernReferralDate') ? document.getElementById('concernReferralDate').value : null,
+      referralOutcome: document.getElementById('concernReferralOutcome') ? document.getElementById('concernReferralOutcome').value : null,
     });
     const submitFollow = document.getElementById('submitFollow');
     if (submitFollow) submitFollow.onclick = () => postProfile('/api/follow-ups', {
@@ -474,6 +591,29 @@
     if (submitStatus) submitStatus.onclick = () => postProfile('/api/students/status', {
       studentId: state.route.studentId,
       status: document.getElementById('studentStatus').value,
+    });
+    const submitCloseConcern = document.getElementById('submitCloseConcern');
+    if (submitCloseConcern) submitCloseConcern.onclick = () => {
+      const concernId = document.getElementById('closeConcernId').value;
+      const outcomeSummary = document.getElementById('closeConcernOutcome').value;
+      if (!outcomeSummary.trim()) { showMessage('Outcome summary is required to close a concern.', 'error'); return; }
+      postProfile('/api/concerns/' + encodeURIComponent(concernId) + '/close', {
+        outcomeSummary,
+        closureNote: document.getElementById('closeConcernNote').value,
+      });
+    };
+    const submitSendPlan = document.getElementById('submitSendPlan');
+    if (submitSendPlan) submitSendPlan.onclick = () => postProfile('/api/send-plans', {
+      studentId: state.route.studentId,
+      planType: document.getElementById('sendPlanType').value,
+      status: document.getElementById('sendPlanStatus').value,
+      planRef: document.getElementById('sendPlanRef').value,
+      reviewDate: document.getElementById('sendReviewDate').value,
+      ehcpAnnualReviewDate: document.getElementById('sendEhcpReviewDate').value,
+      specialistName: document.getElementById('sendSpecialist').value,
+      externalAgency: document.getElementById('sendExternalAgency').value,
+      identifiedNeeds: document.getElementById('sendNeeds').value,
+      plannedProvision: document.getElementById('sendProvision').value,
     });
   }
 
@@ -504,6 +644,15 @@
     });
   }
 
+  function sendCategoryLabel(cat) {
+    return { none: 'No SEND', sen_support: 'SEN Support', ehcp: 'EHCP', assessed_no_need: 'Assessed — No Need' }[cat] || friendlyLabel(cat || 'none');
+  }
+
+  function concernStatusBadge(status) {
+    const cls = { open: '', triage: 'warn', escalated: 'danger', resolved: '', closed: 'secondary' }[status] || '';
+    return `<span class="badge ${cls}">${escapeHtml(friendlyLabel(status))}</span>`;
+  }
+
   function buildTimeline(data) {
     const chronologyRefs = new Set((data.chronology || [])
       .map((item) => item.source_table && item.source_id ? item.source_table + ':' + item.source_id : '')
@@ -517,15 +666,47 @@
       .concat((data.actions || []).filter((item) => includeEntity('actions', item)).map((item) => ({ ...item, source: 'follow_up_created' })))
       .sort((a, b) => new Date(b.occurred_at || b.created_at) - new Date(a.occurred_at || a.created_at));
     if (!items.length) return '<p class="muted">No visible timeline activity yet.</p>';
-    return items.slice(0, 80).map((item) => `
+    return items.slice(0, 80).map((item) => {
+      const extraLines = [];
+      if (item.action_taken) extraLines.push(`<p class="muted small"><strong>Action:</strong> ${escapeHtml(item.action_taken)}</p>`);
+      if (item.outcome) extraLines.push(`<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(item.outcome)}</p>`);
+      if (item.outcome_summary && !item.outcome) extraLines.push(`<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(item.outcome_summary)}</p>`);
+      if (item.referral_type && item.referral_type !== 'none') extraLines.push(`<p class="muted small"><strong>Referral:</strong> ${escapeHtml(item.referral_type.toUpperCase())}${item.referral_date ? ' — ' + escapeHtml(formatDate(item.referral_date, true)) : ''}</p>`);
+      if (item.external_agency) extraLines.push(`<p class="muted small"><strong>Agency:</strong> ${escapeHtml(friendlyLabel(item.external_agency))}</p>`);
+      if (item.next_step) extraLines.push(`<p class="muted small"><strong>Next:</strong> ${escapeHtml(item.next_step)}${item.next_step_due ? ' by ' + escapeHtml(formatDate(item.next_step_due, true)) : ''}${item.next_step_owner_name ? ' (' + escapeHtml(item.next_step_owner_name) + ')' : ''}</p>`);
+      if (item.closed_at) extraLines.push(`<p class="muted small"><strong>Closed:</strong> ${escapeHtml(formatDate(item.closed_at, true))}${item.closed_by_name ? ' by ' + escapeHtml(item.closed_by_name) : ''}</p>`);
+      return `
       <div class="timeline-item">
         <div class="timeline-head">
           <h4>${escapeHtml(item.title || friendlyLabel(item.source))}</h4>
           <span class="badge">${escapeHtml(friendlyLabel(item.source || 'event'))}</span>
         </div>
         <p>${escapeHtml(item.summary || 'Protected event')}</p>
+        ${extraLines.join('')}
         <p class="muted small">${escapeHtml(item.team_name || 'School record')} | ${escapeHtml(friendlyVisibility(item.visibility || item.visibility_level || 'summary'))} | ${escapeHtml(formatDate(item.occurred_at || item.created_at))}</p>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+  }
+
+  function renderSendPlanPanel(plan) {
+    if (!plan) return '';
+    const reviewLabel = { active: 'Active', under_review: 'Under review', closed: 'Closed' }[plan.status] || plan.status;
+    return `
+      <article class="panel compact-panel">
+        <p class="eyebrow">SEND</p>
+        <h3 class="section-title">${escapeHtml(friendlyLabel(plan.plan_type))}</h3>
+        <dl class="detail-list">
+          ${plan.plan_ref ? `<div><dt>Ref</dt><dd>${escapeHtml(plan.plan_ref)}</dd></div>` : ''}
+          <div><dt>Status</dt><dd>${escapeHtml(reviewLabel)}</dd></div>
+          ${plan.review_date ? `<div><dt>Review</dt><dd>${escapeHtml(formatDate(plan.review_date, true))}</dd></div>` : ''}
+          ${plan.ehcp_annual_review_date ? `<div><dt>EHCP review</dt><dd>${escapeHtml(formatDate(plan.ehcp_annual_review_date, true))}</dd></div>` : ''}
+          ${plan.external_agency ? `<div><dt>Agency</dt><dd>${escapeHtml(plan.external_agency)}</dd></div>` : ''}
+          ${plan.specialist_name ? `<div><dt>Specialist</dt><dd>${escapeHtml(plan.specialist_name)}</dd></div>` : ''}
+        </dl>
+        ${plan.identified_needs ? `<p class="muted small" style="margin-top:6px"><strong>Needs:</strong> ${escapeHtml(plan.identified_needs)}</p>` : ''}
+        ${plan.planned_provision ? `<p class="muted small"><strong>Provision:</strong> ${escapeHtml(plan.planned_provision)}</p>` : ''}
+        ${plan.review_outcome ? `<p class="muted small"><strong>Last outcome:</strong> ${escapeHtml(plan.review_outcome)}</p>` : ''}
+      </article>`;
   }
 
   function renderStudentProfilePage() {
@@ -543,6 +724,8 @@
         ['note', 'Add note', 'notes.create'],
         ['meeting', 'Add meeting', 'meetings.create'],
         ['concern', 'Add concern', 'concerns.create'],
+        ['closeconcern', 'Close concern', 'concerns.close'],
+        ['sendplan', 'SEND plan', 'send.manage'],
         ['followup', 'Add follow-up', 'actions.manage'],
         ['radar', 'Add radar', 'radar.manage'],
         ['status', 'Update status', 'students.manage'],
@@ -578,10 +761,12 @@
               <dl class="detail-list">
                 <div><dt>Year/Class</dt><dd>${escapeHtml(student.year_group || '')} ${escapeHtml(student.tutor_group || student.form_group || '')}</dd></div>
                 <div><dt>Status</dt><dd>${escapeHtml(student.current_status)}</dd></div>
+                <div><dt>SEND</dt><dd>${escapeHtml(sendCategoryLabel(student.send_category))}</dd></div>
                 <div><dt>Created</dt><dd>${escapeHtml(formatDate(student.created_at, true))}</dd></div>
                 <div><dt>Updated</dt><dd>${escapeHtml(formatDate(student.updated_at, true))}</dd></div>
               </dl>
             </article>
+            ${renderSendPlanPanel(data.activeSendPlan)}
             <article class="panel compact-panel">
               <p class="eyebrow">Radar Details</p>
               <div class="list compact-list">

@@ -15,6 +15,7 @@
 - Removed the standalone Concerns navigation item; concerns are logged from the student profile.
 - Added migration `006_hybrid_beta_defaults.sql` for radar labels and caseworker student creation.
 - Added migration `007_beta_hardening_nonce_calendar.sql` for nonce persistence, action visibility, and calendar indexes.
+- **Migration `008_ofsted_readiness.sql`**: concern closure with mandatory outcome, referral tracking, SEND plan model, external agency fields on meetings, chronology enrichment, new permissions (concerns.close, send.manage, referrals.manage).
 
 ## Current Architecture
 
@@ -29,11 +30,20 @@
 - Bootstrap, dashboard, compact student list, student creation, student profile, inline support actions, calendar/list meetings, settings, saved filters, and audit view are wired through the Worker API.
 - Radar badges show active team involvement.
 - Filters remain URL-driven and backend-compiled, with a friendly builder as the default staff experience.
+- DSL safeguarding panel on dashboard (concerns.review permission-gated).
+- Concern closure with mandatory outcome summary and escalation log.
+- Referral tracking on safeguarding concerns (MASH, LADO, police, etc.).
+- SEND plan panel on student profile with Assess→Plan→Do→Review fields.
+- External agency fields on meeting log form (conditional display).
+- Enriched timeline entries showing action taken, outcome, next steps, referral info.
 
 ## Remaining Incomplete
 
 - Calendar remains beta-lightweight and is not a full scheduling engine.
 - PostgreSQL RLS is not implemented yet; keep it as a later hardening option.
+- `agency_contacts` table defined in schema design but not yet wired (log via meetings for now).
+- `attendance_imports` table designed but not wired; attendance data must come from MIS (SIMS/Arbor) via a future import script.
+- Backfill/import UI for spreadsheet data not yet built.
 - Deployment note: Apps Script Execution API invocation was not permitted from `clasp`, so the current production deployment was aligned with the Worker secret at deploy time. Before the next clean redeploy, set Apps Script script properties or repeat the bridge-secret deployment alignment.
 
 ## Required Secrets
@@ -73,4 +83,9 @@ Local migration secret:
 - Confirm Dashboard, Calendar, and Settings load without large layout jumps.
 - Create a student as a caseworker/admin.
 - Open a profile and add a note, meeting, concern, follow-up, radar, and status change.
-- Verify a lower-privilege user sees redacted or hidden data.
+- Log a safeguarding concern and verify referral fields appear conditionally.
+- Close a concern — verify outcome summary is required.
+- Add a SEND plan and verify it appears in the sidebar panel.
+- Log a meeting with an external agency and verify the fields appear.
+- As a DSL (concerns.review role), verify the safeguarding panel appears on the dashboard.
+- Verify a lower-privilege user sees redacted or hidden data, and does not see the DSL panel.
