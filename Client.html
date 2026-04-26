@@ -75,25 +75,38 @@
   }
 
   function parseRoute() {
-    const url = new URL(window.location.href);
+    let parsed = {};
+    try {
+      const raw = window.location.hash.slice(1);
+      if (raw) parsed = JSON.parse(decodeURIComponent(raw));
+    } catch (e) { /* ignore malformed hash */ }
     state.route = {
-      page: url.searchParams.get('page') || 'dashboard',
-      studentId: url.searchParams.get('studentId') || '',
-      q: url.searchParams.get('q') || '',
-      filter: url.searchParams.get('filter') || '',
-      filterMode: url.searchParams.get('filterMode') || (url.searchParams.get('filter') ? 'advanced' : 'builder'),
-      view: url.searchParams.get('view') || 'calendar',
-      settingsTab: url.searchParams.get('settingsTab') || 'users',
+      page: parsed.page || 'dashboard',
+      studentId: parsed.studentId || '',
+      q: parsed.q || '',
+      filter: parsed.filter || '',
+      filterMode: parsed.filterMode || (parsed.filter ? 'advanced' : 'builder'),
+      view: parsed.view || 'calendar',
+      settingsTab: parsed.settingsTab || 'users',
     };
   }
 
   function updateRoute(next) {
-    const url = new URL(window.location.href);
+    const current = Object.assign({}, state.route);
     Object.keys(next).forEach((key) => {
-      if (next[key]) url.searchParams.set(key, next[key]);
-      else url.searchParams.delete(key);
+      if (next[key]) current[key] = next[key];
+      else delete current[key];
     });
-    window.history.pushState({}, '', url.toString());
+    // Strip defaults to keep hash short
+    if (current.page === 'dashboard') delete current.page;
+    if (!current.studentId) delete current.studentId;
+    if (!current.q) delete current.q;
+    if (!current.filter) delete current.filter;
+    if (current.filterMode === 'builder') delete current.filterMode;
+    if (current.view === 'calendar') delete current.view;
+    if (current.settingsTab === 'users') delete current.settingsTab;
+    const hash = Object.keys(current).length ? encodeURIComponent(JSON.stringify(current)) : '';
+    window.history.pushState({}, '', '#' + hash);
     parseRoute();
     renderRoute();
   }
@@ -1820,10 +1833,8 @@
       .getBootstrapData();
   }
 
-  window.addEventListener('popstate', () => {
-    parseRoute();
-    renderRoute();
-  });
+  window.addEventListener('popstate', () => { parseRoute(); renderRoute(); });
+  window.addEventListener('hashchange', () => { parseRoute(); renderRoute(); });
 
   bootstrapApp();
 </script>
