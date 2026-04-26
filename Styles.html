@@ -511,6 +511,19 @@
     font-weight: 700;
   }
 
+  .profile-tabs-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .tab-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
+  .tab-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sage); display: inline-block; }
+  .tab-dot.danger { background: #b91c1c; }
+  .tab-dot.warn { background: #b45309; }
+  .concern-card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-high); margin-bottom: 6px; overflow: hidden; }
+  .concern-card-header { padding: 9px 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .concern-card-header strong { flex: 1; }
+  .concern-card-body { padding: 10px 12px; border-top: 1px solid var(--line); background: var(--surface-low); }
+  .concern-linked-followups { margin-top: 8px; }
+  .concern-inline-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+
   @media (max-width: 1180px) {
     .grid-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .profile-layout, .two-col, .app-shell {

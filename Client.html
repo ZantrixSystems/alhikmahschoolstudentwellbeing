@@ -5,6 +5,7 @@
     activeProfileAction: '',
     profileData: null,
     profileSaving: false,
+    profileTab: 'overview',
     pageCache: {},
   };
 
@@ -543,7 +544,14 @@
           </div>
           <button class="button span-2" id="submitConcern">Log concern</button>
         </div>`,
-      followup: `
+      followup: (() => {
+        const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
+        const concernLinkSelect = openConcerns.length ? `
+          <select id="followConcernId" class="span-2">
+            <option value="">Not linked to a concern</option>
+            ${openConcerns.map((c) => `<option value="${escapeHtml(c.id)}">[${escapeHtml(c.severity)}] ${escapeHtml(c.title)}</option>`).join('')}
+          </select>` : '';
+        return `
         <div class="form-grid">
           <input id="followTitle" placeholder="Follow-up title">
           <input id="followDueAt" type="date">
@@ -551,9 +559,11 @@
           <select id="followPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
           <select id="followTeam"><option value="">No team</option>${teams}</select>
           <select id="followVisibility"><option value="summary">Summary</option><option value="indicator">Indicator</option><option value="full">Full</option></select>
+          ${concernLinkSelect}
           <textarea id="followSummary" class="span-2" rows="3" placeholder="What needs to happen?"></textarea>
           <button class="button span-2" id="submitFollow">Add follow-up</button>
-        </div>`,
+        </div>`;
+      })(),
       radar: `
         <div class="form-grid">
           <select id="radarTeam" class="span-2">${teams}</select>
@@ -665,6 +675,7 @@
       visibilityLevel: document.getElementById('followVisibility').value,
       dueAt: document.getElementById('followDueAt').value,
       teamId: document.getElementById('followTeam').value,
+      concernId: document.getElementById('followConcernId') ? document.getElementById('followConcernId').value || null : null,
     });
     const submitRadar = document.getElementById('submitRadar');
     if (submitRadar) submitRadar.onclick = () => postProfile('/api/radar', {
@@ -726,11 +737,8 @@
       const timeline = document.querySelector('.timeline');
       if (timeline) timeline.innerHTML = buildTimeline(data);
       const radarRow = document.querySelector('.profile-heading .badge-row');
-      if (radarRow) radarRow.innerHTML = (data.radar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map(radarBadge).join('') || '<span class="muted small">No active radar</span>';
-      const existingStrip = document.querySelector('.active-strip');
-      const newStrip = buildActiveStrip(data);
-      if (existingStrip) existingStrip.outerHTML = newStrip || '';
-      else if (newStrip) document.getElementById('profileActionHost').insertAdjacentHTML('afterend', newStrip);
+      if (radarRow) radarRow.innerHTML = (data.derivedRadar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map((r) => radarBadge({ teamKey: r.team_key, teamName: r.team_name })).join('') || '<span class="muted small">No active radar</span>';
+      renderProfileTab(data);
     }).finally(() => {
       state.profileSaving = false;
     });
@@ -801,98 +809,14 @@
       </article>`;
   }
 
-  function buildActiveStrip(data) {
-    const openConcerns = (data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
-    const openFollowUps = (data.actions || []).filter((a) => ['open','in_progress'].includes(a.status));
-    const recentMeetings = (data.meetings || []).slice(0, 3);
-    if (!openConcerns.length && !openFollowUps.length && !recentMeetings.length) return '';
+  function renderProfileTab(data) {
+    const host = document.getElementById('profileTabContent');
+    if (!host) return;
+    const tab = state.profileTab;
+    const student = data.profile;
 
-    const concernsHtml = openConcerns.length ? `
-      <div class="active-strip-col">
-        <p class="eyebrow safeguarding-eyebrow">Open Concerns</p>
-        ${openConcerns.map((c) => `
-          <div class="active-strip-item">
-            <div class="active-strip-row">
-              ${concernStatusBadge(c.status)}
-              <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
-              <strong>${escapeHtml(c.title)}</strong>
-            </div>
-            <p class="muted small">${escapeHtml(c.team_name || 'No team')} | Logged ${escapeHtml(formatDate(c.occurred_at || c.created_at, true))}</p>
-          </div>`).join('')}
-      </div>` : '';
-
-    const followUpsHtml = openFollowUps.length ? `
-      <div class="active-strip-col">
-        <p class="eyebrow">Open Follow-ups</p>
-        ${openFollowUps.map((a) => `
-          <div class="active-strip-item">
-            <div class="active-strip-row">
-              <span class="badge ${a.priority === 'high' ? 'danger' : a.priority === 'medium' ? 'warn' : ''}">${escapeHtml(a.priority || 'normal')}</span>
-              <strong>${escapeHtml(a.title)}</strong>
-            </div>
-            <p class="muted small">${a.due_at ? 'Due ' + escapeHtml(formatDate(a.due_at, true)) : 'No due date'} | ${escapeHtml(a.team_name || 'No team')}</p>
-          </div>`).join('')}
-      </div>` : '';
-
-    const meetingsHtml = recentMeetings.length ? `
-      <div class="active-strip-col">
-        <p class="eyebrow">Recent Meetings</p>
-        ${recentMeetings.map((m) => `
-          <div class="active-strip-item">
-            <div class="active-strip-row">
-              <span class="badge blue">${escapeHtml(friendlyLabel(m.interaction_type))}</span>
-              <strong>${escapeHtml(m.title)}</strong>
-            </div>
-            <p class="muted small">${escapeHtml(formatDate(m.occurred_at, true))} | ${escapeHtml(m.team_name || 'No team')}</p>
-          </div>`).join('')}
-      </div>` : '';
-
-    return `
-      <section class="panel compact-panel active-strip">
-        <div class="active-strip-grid">
-          ${concernsHtml}${followUpsHtml}${meetingsHtml}
-        </div>
-      </section>`;
-  }
-
-  function renderStudentProfilePage() {
-    setPageTitle('Profile');
-    const target = document.getElementById('studentProfilePage');
-    if (!state.route.studentId) {
-      target.innerHTML = '<section class="panel"><p class="muted">Choose a student from the directory.</p></section>';
-      return;
-    }
-    target.innerHTML = '<section class="panel"><p class="muted">Loading profile...</p></section>';
-    const profileGuard = getRenderGuard();
-    callServer({ path: '/api/students/' + encodeURIComponent(state.route.studentId), method: 'get' }).then((data) => {
-      if (!profileGuard()) return;
-      state.profileData = data;
-      const student = data.profile;
-      const actionButtons = [
-        ['note', 'Add note', 'notes.create'],
-        ['meeting', 'Add meeting', 'meetings.create'],
-        ['concern', 'Add concern', 'concerns.create'],
-        ['closeconcern', 'Close concern', 'concerns.close'],
-        ['sendplan', 'SEND plan', 'send.manage'],
-        ['followup', 'Add follow-up', 'actions.manage'],
-        ['radar', 'Add radar', 'radar.manage'],
-        ['status', 'Update status', 'students.manage'],
-      ].filter(([, , permission]) => hasPermission(permission));
-
-      target.innerHTML = `
-        <section class="profile-heading panel compact-panel">
-          <div>
-            <button class="text-button" id="backToStudents">Back to students</button>
-            <h3>${escapeHtml(studentName(student))}</h3>
-            <p class="muted">${escapeHtml(student.student_code)} | ${escapeHtml(student.year_group || 'No year')} | ${escapeHtml(student.tutor_group || student.form_group || 'No class')}</p>
-          </div>
-          <div class="badge-row">${(data.radar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map(radarBadge).join('') || '<span class="muted small">No active radar</span>'}</div>
-        </section>
-        <section class="profile-actions">
-          ${actionButtons.map(([key, label]) => `<button class="button ${state.activeProfileAction === key ? '' : 'secondary'}" data-profile-action="${key}">${label}</button>`).join('')}
-        </section>
-        <div id="profileActionHost">${profileActionForm(state.activeProfileAction, data)}</div>
-        ${buildActiveStrip(data)}
+    if (tab === 'overview') {
+      host.innerHTML = `
         <section class="profile-layout">
           <main class="panel">
             <div class="panel-header">
@@ -919,16 +843,214 @@
             <article class="panel compact-panel">
               <p class="eyebrow">Radar Details</p>
               <div class="list compact-list">
-                ${(data.radar || []).map((radar) => `
+                ${(data.derivedRadar || []).map((r) => `
                   <article class="mini-record">
-                    <div class="badge-row">${radarBadge(radar)}<span class="badge">${escapeHtml(radar.status)}</span></div>
-                    <p>${escapeHtml(radar.summary || 'No visible summary.')}</p>
-                    <p class="muted small">Added ${escapeHtml(formatDate(radar.occurred_at, true))} | Lead ${escapeHtml(radar.assigned_lead_name || 'Unassigned')}</p>
+                    <div class="badge-row">${radarBadge({ teamKey: r.team_key, teamName: r.team_name })}<span class="badge ${r.severity === 'high' ? 'danger' : r.severity === 'medium' ? 'warn' : ''}">${escapeHtml(r.severity)}</span><span class="badge">${escapeHtml(r.status)}</span></div>
+                    <p class="muted small">${escapeHtml(r.team_name)}</p>
                   </article>`).join('') || '<p class="muted">No visible radar records.</p>'}
               </div>
             </article>
           </aside>
+        </section>`;
+      return;
+    }
+
+    if (tab === 'concerns') {
+      const expandedConcerns = new Set();
+      const allConcerns = (data.concerns || []).slice().sort((a, b) => {
+        const aOpen = ['open','triage','escalated'].includes(a.status) ? 0 : 1;
+        const bOpen = ['open','triage','escalated'].includes(b.status) ? 0 : 1;
+        return aOpen - bOpen || new Date(b.created_at) - new Date(a.created_at);
+      });
+      const studentId = state.route.studentId;
+
+      function renderConcernCards() {
+        return allConcerns.map((c) => {
+          const isOpen = ['open','triage','escalated'].includes(c.status);
+          const isExpanded = expandedConcerns.has(c.id);
+          const linkedFuHtml = (c.linkedFollowUps && c.linkedFollowUps.length) ? `
+            <div class="concern-linked-followups">
+              <p class="eyebrow" style="margin-bottom:4px">Linked Follow-ups</p>
+              ${c.linkedFollowUps.map((fu) => `
+                <div class="active-strip-item" style="margin-bottom:4px">
+                  <div class="active-strip-row">
+                    <span class="badge ${fu.priority === 'high' ? 'danger' : fu.priority === 'medium' ? 'warn' : ''}">${escapeHtml(fu.priority || 'normal')}</span>
+                    <span class="badge">${escapeHtml(friendlyLabel(fu.status))}</span>
+                    <strong>${escapeHtml(fu.title)}</strong>
+                  </div>
+                  <p class="muted small">${fu.due_at ? 'Due ' + escapeHtml(formatDate(fu.due_at, true)) : 'No due date'}</p>
+                </div>`).join('')}
+            </div>` : '';
+          const bodyHtml = isExpanded ? `
+            <div class="concern-card-body">
+              <p>${escapeHtml(c.summary || 'No summary.')}</p>
+              ${c.referral_type && c.referral_type !== 'none' ? `<p class="muted small"><strong>Referral:</strong> ${escapeHtml(c.referral_type.toUpperCase())}</p>` : ''}
+              ${c.outcome_summary ? `<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(c.outcome_summary)}</p>` : ''}
+              ${c.closed_at ? `<p class="muted small"><strong>Closed:</strong> ${escapeHtml(formatDate(c.closed_at, true))}</p>` : ''}
+              ${linkedFuHtml}
+              <div class="concern-inline-form">
+                <p class="eyebrow" style="margin-bottom:6px">Add follow-up for this concern</p>
+                <div class="form-grid">
+                  <input class="concern-fu-title" placeholder="Follow-up title" data-concern-id="${escapeHtml(c.id)}">
+                  <input class="concern-fu-due" type="date" data-concern-id="${escapeHtml(c.id)}">
+                  <select class="concern-fu-priority" data-concern-id="${escapeHtml(c.id)}">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                  <button class="button concern-fu-submit" data-concern-id="${escapeHtml(c.id)}" data-team-id="${escapeHtml(c.team_id || '')}">Add</button>
+                </div>
+              </div>
+            </div>` : '';
+          return `
+            <div class="concern-card" data-concern-card-id="${escapeHtml(c.id)}">
+              <div class="concern-card-header" data-toggle-concern="${escapeHtml(c.id)}">
+                <strong>${escapeHtml(c.title)}</strong>
+                <span class="badge">${escapeHtml(friendlyLabel(c.category || 'general'))}</span>
+                <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
+                ${concernStatusBadge(c.status)}
+                <span class="muted small">${escapeHtml(formatDate(c.created_at, true))}</span>
+              </div>
+              ${bodyHtml}
+            </div>`;
+        }).join('');
+      }
+
+      host.innerHTML = `<div id="concernCardsContainer">${renderConcernCards()}</div>`;
+
+      function bindConcernCards() {
+        host.querySelectorAll('[data-toggle-concern]').forEach((el) => {
+          el.onclick = () => {
+            const id = el.dataset.toggleConcern;
+            if (expandedConcerns.has(id)) expandedConcerns.delete(id);
+            else expandedConcerns.add(id);
+            document.getElementById('concernCardsContainer').innerHTML = renderConcernCards();
+            bindConcernCards();
+          };
+        });
+        host.querySelectorAll('.concern-fu-submit').forEach((btn) => {
+          btn.onclick = () => {
+            const concernId = btn.dataset.concernId;
+            const teamId = btn.dataset.teamId;
+            const titleEl = host.querySelector(`.concern-fu-title[data-concern-id="${concernId}"]`);
+            const dueEl = host.querySelector(`.concern-fu-due[data-concern-id="${concernId}"]`);
+            const priorityEl = host.querySelector(`.concern-fu-priority[data-concern-id="${concernId}"]`);
+            const title = titleEl ? titleEl.value : '';
+            if (!title.trim()) return;
+            postProfile('/api/follow-ups', {
+              studentId,
+              title,
+              summary: title,
+              priority: priorityEl ? priorityEl.value : 'medium',
+              dueAt: dueEl ? dueEl.value : '',
+              teamId,
+              concernId,
+            });
+          };
+        });
+      }
+
+      bindConcernCards();
+      return;
+    }
+
+    if (tab === 'meetings') {
+      const meetings = (data.meetings || []).slice().sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
+      host.innerHTML = `<div class="list compact-list">${meetings.map((m) => `
+        <article class="list-row compact-row" style="cursor:default">
+          <header>
+            <div>
+              <h4>${escapeHtml(m.title)}</h4>
+              <p class="muted">${escapeHtml(m.team_name || 'No team')} | ${escapeHtml(formatDate(m.occurred_at, true))}</p>
+            </div>
+            <span class="badge blue">${escapeHtml(friendlyLabel(m.interaction_type))}</span>
+          </header>
+          <p>${escapeHtml(m.summary || '')}</p>
+        </article>`).join('') || '<p class="muted">No meetings recorded.</p>'}</div>`;
+      return;
+    }
+
+    if (tab === 'followups') {
+      const openFu = (data.actions || []).filter((a) => ['open','in_progress'].includes(a.status));
+      const closedFu = (data.actions || []).filter((a) => !['open','in_progress'].includes(a.status));
+      function fuRow(a, highlighted) {
+        return `
+          <article class="list-row compact-row" style="cursor:default${highlighted ? ';border-left:3px solid var(--sage)' : ''}">
+            <header>
+              <div>
+                <h4>${escapeHtml(a.title)}</h4>
+                <p class="muted">${escapeHtml(a.team_name || 'No team')} | ${a.due_at ? 'Due ' + escapeHtml(formatDate(a.due_at, true)) : 'No due date'}</p>
+              </div>
+              <div style="display:flex;gap:4px;align-items:center">
+                <span class="badge ${a.priority === 'high' ? 'danger' : a.priority === 'medium' ? 'warn' : ''}">${escapeHtml(a.priority || 'normal')}</span>
+                <span class="badge">${escapeHtml(friendlyLabel(a.status))}</span>
+              </div>
+            </header>
+          </article>`;
+      }
+      host.innerHTML = `
+        <div class="list compact-list">
+          ${openFu.map((a) => fuRow(a, true)).join('')}
+          ${closedFu.map((a) => fuRow(a, false)).join('')}
+          ${!openFu.length && !closedFu.length ? '<p class="muted">No follow-ups recorded.</p>' : ''}
+        </div>`;
+      return;
+    }
+  }
+
+  function renderStudentProfilePage() {
+    setPageTitle('Profile');
+    const target = document.getElementById('studentProfilePage');
+    if (!state.route.studentId) {
+      target.innerHTML = '<section class="panel"><p class="muted">Choose a student from the directory.</p></section>';
+      return;
+    }
+    target.innerHTML = '<section class="panel"><p class="muted">Loading profile...</p></section>';
+    const profileGuard = getRenderGuard();
+    callServer({ path: '/api/students/' + encodeURIComponent(state.route.studentId), method: 'get' }).then((data) => {
+      if (!profileGuard()) return;
+      state.profileData = data;
+      const student = data.profile;
+      const openConcernCount = (data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status)).length;
+      const hasRecentMeetings = (data.meetings || []).length > 0;
+      const hasOpenFollowUps = (data.actions || []).some((a) => ['open','in_progress'].includes(a.status));
+
+      const actionButtons = [
+        ['note', 'Add note', 'notes.create'],
+        ['meeting', 'Add meeting', 'meetings.create'],
+        ['concern', 'Add concern', 'concerns.create'],
+        ['closeconcern', 'Close concern', 'concerns.close'],
+        ['sendplan', 'SEND plan', 'send.manage'],
+        ['followup', 'Add follow-up', 'actions.manage'],
+        ['status', 'Update status', 'students.manage'],
+      ].filter(([, , permission]) => hasPermission(permission));
+
+      target.innerHTML = `
+        <section class="profile-heading panel compact-panel">
+          <div>
+            <button class="text-button" id="backToStudents">Back to students</button>
+            <h3>${escapeHtml(studentName(student))}</h3>
+            <p class="muted">${escapeHtml(student.student_code)} | ${escapeHtml(student.year_group || 'No year')} | ${escapeHtml(student.tutor_group || student.form_group || 'No class')}</p>
+          </div>
+          <div class="badge-row">${(data.derivedRadar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map((r) => radarBadge({ teamKey: r.team_key, teamName: r.team_name })).join('') || '<span class="muted small">No active radar</span>'}</div>
         </section>
+        <section class="profile-actions">
+          ${actionButtons.map(([key, label]) => `<button class="button ${state.activeProfileAction === key ? '' : 'secondary'}" data-profile-action="${key}">${label}</button>`).join('')}
+        </section>
+        <div id="profileActionHost">${profileActionForm(state.activeProfileAction, data)}</div>
+        <div class="profile-tabs-bar">
+          <button data-profile-tab="overview" class="tab-btn${state.profileTab === 'overview' ? ' active' : ''}">Overview</button>
+          <button data-profile-tab="concerns" class="tab-btn${state.profileTab === 'concerns' ? ' active' : ''}">
+            Concerns${openConcernCount > 0 ? ' <span class="tab-dot danger"></span>' : ''}
+          </button>
+          <button data-profile-tab="meetings" class="tab-btn${state.profileTab === 'meetings' ? ' active' : ''}">
+            Meetings${hasRecentMeetings ? ' <span class="tab-dot"></span>' : ''}
+          </button>
+          <button data-profile-tab="followups" class="tab-btn${state.profileTab === 'followups' ? ' active' : ''}">
+            Follow-ups${hasOpenFollowUps ? ' <span class="tab-dot warn"></span>' : ''}
+          </button>
+        </div>
+        <div id="profileTabContent"></div>
       `;
       document.getElementById('backToStudents').onclick = () => updateRoute({ page: 'students', studentId: '' });
       Array.from(document.querySelectorAll('[data-profile-action]')).forEach((button) => {
@@ -941,7 +1063,17 @@
           bindProfileActionHandlers();
         };
       });
+      Array.from(document.querySelectorAll('[data-profile-tab]')).forEach((btn) => {
+        btn.onclick = () => {
+          state.profileTab = btn.dataset.profileTab;
+          Array.from(document.querySelectorAll('[data-profile-tab]')).forEach((b) => {
+            b.className = 'tab-btn' + (state.profileTab === b.dataset.profileTab ? ' active' : '');
+          });
+          renderProfileTab(data);
+        };
+      });
       bindProfileActionHandlers();
+      renderProfileTab(data);
     });
   }
 

@@ -647,9 +647,9 @@ function createApi(env, actorEmail) {
       ),
       query(
         [
-          'SELECT t.id, t.name, t.team_key, t.accent_color, COUNT(r.id)::int AS active_students',
+          'SELECT t.id, t.name, t.team_key, t.accent_color, COUNT(DISTINCT c.student_id)::int AS active_students',
           'FROM teams t',
-          'LEFT JOIN student_team_radar r ON r.team_id = t.id AND r.deleted_at IS NULL AND r.status IN (\'active\', \'monitoring\')',
+          "LEFT JOIN concerns c ON c.team_id = t.id AND c.deleted_at IS NULL AND c.status IN ('open','triage','escalated')",
           'WHERE t.deleted_at IS NULL',
           'GROUP BY t.id',
           'ORDER BY t.name',
@@ -763,7 +763,7 @@ function createApi(env, actorEmail) {
     const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw, activeSendPlan] = await Promise.all([
       canReviewConcerns ? query(
         [
-          'SELECT c.id, c.team_id, t.name AS team_name, c.title, c.summary, c.detail,',
+          'SELECT c.id, c.team_id, t.name AS team_name, t.team_key AS team_key, c.title, c.summary, c.detail,',
           '  c.status, c.category, c.severity, c.urgency, c.confidentiality_level,',
           '  c.outcome_summary, c.referral_type, c.referral_date, c.referral_outcome,',
           '  c.closed_at, c.created_at, c.created_at AS occurred_at,',
@@ -811,6 +811,25 @@ function createApi(env, actorEmail) {
           'ORDER BY sp.created_at DESC LIMIT 1',
         ].join('\n'), [studentId]) : null,
     ]);
+    // Attach linked follow-ups (actions with concern_id) to each concern
+    const linkedActions = canManageActions ? await query(
+      'SELECT a.id, a.concern_id, a.title, a.summary, a.status, a.priority, a.due_at, a.created_at, t.name AS team_name FROM actions a LEFT JOIN teams t ON t.id = a.team_id WHERE a.student_id = $1 AND a.concern_id IS NOT NULL AND a.deleted_at IS NULL ORDER BY a.created_at DESC',
+      [studentId]
+    ) : [];
+    concernsRaw.forEach(c => { c.linkedFollowUps = linkedActions.filter(a => a.concern_id === c.id); });
+
+    // Derive radar badges from open concerns (does not replace the radar table query)
+    const derivedRadar = {};
+    (concernsRaw || [])
+      .filter(c => ['open', 'triage', 'escalated'].includes(c.status) && c.team_id)
+      .forEach(c => {
+        if (!derivedRadar[c.team_id]) {
+          derivedRadar[c.team_id] = { team_id: c.team_id, team_name: c.team_name, team_key: c.team_key || null, status: 'active', severity: c.severity };
+        } else if (['high', 'medium', 'low'].indexOf(c.severity) < ['high', 'medium', 'low'].indexOf(derivedRadar[c.team_id].severity)) {
+          derivedRadar[c.team_id].severity = c.severity;
+        }
+      });
+
     await writeAuditLog(auth, { areaKey: 'students', actionKey: 'profile.view', entityType: 'student', entityId: studentId, studentId, metadata: { sensitiveRead: true } });
     return {
       profile: student,
@@ -821,6 +840,7 @@ function createApi(env, actorEmail) {
       notes: applyVisibility(auth, matrix, notesRaw, 'chronology', 'visibility_level'),
       chronology: applyVisibility(auth, matrix, chronologyRaw, 'chronology', 'visibility_level'),
       activeSendPlan: activeSendPlan || null,
+      derivedRadar: Object.values(derivedRadar),
     };
   }
 
@@ -988,10 +1008,10 @@ function createApi(env, actorEmail) {
     if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
     const action = await queryOne(
       [
-        'INSERT INTO actions (student_id, team_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $3, $3) RETURNING *',
+        'INSERT INTO actions (student_id, team_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $3, $3) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary']
+      [body.studentId, body.teamId || null, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary', body.concernId || null]
     );
     await addChronology(auth, body.studentId, 'actions', action.id, 'follow_up_created', body.teamId, body.title, body.summary, null, 'summary');
     return { action };
