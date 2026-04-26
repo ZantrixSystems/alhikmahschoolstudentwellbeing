@@ -57,14 +57,16 @@
 
   function callServer(request) {
     setStatus('Loading');
+    console.log('[callServer]', request.method, request.path);
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler((result) => {
+          console.log('[callServer] OK', request.path);
           setStatus('');
           resolve(result);
         })
         .withFailureHandler((error) => {
-          console.error(error);
+          console.error('[callServer] FAIL', request.path, error);
           setStatus('Error');
           const message = error && error.message ? String(error.message).replace(/^Error:\s*/, '') : '';
           showMessage(message || 'Something went wrong. Please try again or contact support.', 'error');
