@@ -1034,7 +1034,7 @@
       </tr>`).join('');
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>From</th><th>To</th><th>Record</th><th>Access</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Whose data</th><th>Who can see it</th><th>What they can see</th><th>How much</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></article>
         <article class="panel compact-panel"><h3 class="section-title" id="visibilityFormTitle">Add Sharing Rule</h3><div class="form-grid"><label class="span-2" style="font-size:0.8rem;color:var(--muted)">From team (owner)</label><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><label class="span-2" style="font-size:0.8rem;color:var(--muted)">To team (can see)</label><select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
       </div>`;
   }
