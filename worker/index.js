@@ -1426,7 +1426,7 @@ function createApi(env, actorEmail) {
   async function saveVisibilityRule(auth, body) {
     await assertPermission(auth, 'settings.visibility.manage');
     if (!body.sourceTeamId || !body.targetTeamId || !body.contentType || !body.visibilityLevel) throw new AppError('sourceTeamId, targetTeamId, contentType, and visibilityLevel are required');
-    const visibilityRule = await queryOne('INSERT INTO team_visibility_rules (source_team_id, target_team_id, content_type, visibility_level, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (source_team_id, target_team_id, content_type) DO UPDATE SET visibility_level = EXCLUDED.visibility_level, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [body.sourceTeamId, body.targetTeamId, body.contentType, body.visibilityLevel, auth.userId]);
+    const visibilityRule = await queryOne('INSERT INTO team_visibility_rules (source_team_id, target_team_id, content_type, visibility_level, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (source_team_id, target_team_id, content_type) DO UPDATE SET visibility_level = EXCLUDED.visibility_level, deleted_at = NULL, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [body.sourceTeamId, body.targetTeamId, body.contentType, body.visibilityLevel, auth.userId]);
     await writeAuditLog(auth, { areaKey: 'settings.visibility', actionKey: 'upsert', entityType: 'team_visibility_rule', entityId: visibilityRule.id, targetTeamId: body.targetTeamId });
     return { visibilityRule };
   }

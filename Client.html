@@ -1721,13 +1721,11 @@
         const existing = ruleMap[pKey];
         const next = () => runNext(i + 1);
         const fail = (e) => showMessage('Save failed: ' + e.message, 'error');
-        if (existing && newLevel === 'none') {
+        if (newLevel === 'none' && existing) {
+          // Only delete if there's an existing rule to remove
           callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } }).then(next).catch(fail);
-        } else if (existing) {
-          callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } })
-            .then(() => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }))
-            .then(next).catch(fail);
         } else if (newLevel !== 'none') {
+          // Upsert — worker clears deleted_at if rule was previously soft-deleted
           callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }).then(next).catch(fail);
         } else {
           next();
