@@ -401,6 +401,13 @@
   .detail-list div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; }
   .detail-list dt { color: var(--muted); font-size: 12px; }
   .detail-list dd { margin: 0; font-weight: 700; }
+  .active-strip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .active-strip-col { display: flex; flex-direction: column; gap: 6px; }
+  .active-strip-col .eyebrow { margin-bottom: 2px; }
+  .active-strip-item { padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,0.64); }
+  .active-strip-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 2px; }
+  .active-strip-item p { margin: 0; }
+
   .mini-record {
     padding: 7px 9px;
     border: 1px solid var(--line);

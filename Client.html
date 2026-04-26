@@ -727,6 +727,10 @@
       if (timeline) timeline.innerHTML = buildTimeline(data);
       const radarRow = document.querySelector('.profile-heading .badge-row');
       if (radarRow) radarRow.innerHTML = (data.radar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map(radarBadge).join('') || '<span class="muted small">No active radar</span>';
+      const existingStrip = document.querySelector('.active-strip');
+      const newStrip = buildActiveStrip(data);
+      if (existingStrip) existingStrip.outerHTML = newStrip || '';
+      else if (newStrip) document.getElementById('profileActionHost').insertAdjacentHTML('afterend', newStrip);
     }).finally(() => {
       state.profileSaving = false;
     });
@@ -797,6 +801,60 @@
       </article>`;
   }
 
+  function buildActiveStrip(data) {
+    const openConcerns = (data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
+    const openFollowUps = (data.actions || []).filter((a) => ['open','in_progress'].includes(a.status));
+    const recentMeetings = (data.meetings || []).slice(0, 3);
+    if (!openConcerns.length && !openFollowUps.length && !recentMeetings.length) return '';
+
+    const concernsHtml = openConcerns.length ? `
+      <div class="active-strip-col">
+        <p class="eyebrow safeguarding-eyebrow">Open Concerns</p>
+        ${openConcerns.map((c) => `
+          <div class="active-strip-item">
+            <div class="active-strip-row">
+              ${concernStatusBadge(c.status)}
+              <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
+              <strong>${escapeHtml(c.title)}</strong>
+            </div>
+            <p class="muted small">${escapeHtml(c.team_name || 'No team')} | Logged ${escapeHtml(formatDate(c.occurred_at || c.created_at, true))}</p>
+          </div>`).join('')}
+      </div>` : '';
+
+    const followUpsHtml = openFollowUps.length ? `
+      <div class="active-strip-col">
+        <p class="eyebrow">Open Follow-ups</p>
+        ${openFollowUps.map((a) => `
+          <div class="active-strip-item">
+            <div class="active-strip-row">
+              <span class="badge ${a.priority === 'high' ? 'danger' : a.priority === 'medium' ? 'warn' : ''}">${escapeHtml(a.priority || 'normal')}</span>
+              <strong>${escapeHtml(a.title)}</strong>
+            </div>
+            <p class="muted small">${a.due_at ? 'Due ' + escapeHtml(formatDate(a.due_at, true)) : 'No due date'} | ${escapeHtml(a.team_name || 'No team')}</p>
+          </div>`).join('')}
+      </div>` : '';
+
+    const meetingsHtml = recentMeetings.length ? `
+      <div class="active-strip-col">
+        <p class="eyebrow">Recent Meetings</p>
+        ${recentMeetings.map((m) => `
+          <div class="active-strip-item">
+            <div class="active-strip-row">
+              <span class="badge blue">${escapeHtml(friendlyLabel(m.interaction_type))}</span>
+              <strong>${escapeHtml(m.title)}</strong>
+            </div>
+            <p class="muted small">${escapeHtml(formatDate(m.occurred_at, true))} | ${escapeHtml(m.team_name || 'No team')}</p>
+          </div>`).join('')}
+      </div>` : '';
+
+    return `
+      <section class="panel compact-panel active-strip">
+        <div class="active-strip-grid">
+          ${concernsHtml}${followUpsHtml}${meetingsHtml}
+        </div>
+      </section>`;
+  }
+
   function renderStudentProfilePage() {
     setPageTitle('Profile');
     const target = document.getElementById('studentProfilePage');
@@ -834,6 +892,7 @@
           ${actionButtons.map(([key, label]) => `<button class="button ${state.activeProfileAction === key ? '' : 'secondary'}" data-profile-action="${key}">${label}</button>`).join('')}
         </section>
         <div id="profileActionHost">${profileActionForm(state.activeProfileAction, data)}</div>
+        ${buildActiveStrip(data)}
         <section class="profile-layout">
           <main class="panel">
             <div class="panel-header">
