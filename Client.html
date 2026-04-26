@@ -9,6 +9,7 @@
   };
 
   const PAGE_CACHE_TTL = 60000;
+  let renderGeneration = 0;
 
   function getCached(key) {
     const entry = state.pageCache[key];
@@ -23,6 +24,13 @@
 
   function bustCache(key) {
     delete state.pageCache[key];
+  }
+
+  // Returns a guard function. Call it before painting async results — if the
+  // render generation has moved on (user navigated away), returns false.
+  function getRenderGuard() {
+    const gen = ++renderGeneration;
+    return () => renderGeneration === gen;
   }
 
   function setStatus(text) {
@@ -153,14 +161,22 @@
 
   function renderNav() {
     const nav = document.getElementById('nav');
-    nav.innerHTML = '';
-    (state.bootstrap.navigation || []).forEach((item) => {
-      const isActive = state.route.page === item.key || (item.key === 'students' && state.route.page === 'student-profile');
-      const button = document.createElement('button');
-      button.className = 'nav-button' + (isActive ? ' active' : '');
-      button.textContent = item.label;
-      button.onclick = () => updateRoute({ page: item.key, studentId: '', settingsTab: '', filter: '', q: '' });
-      nav.appendChild(button);
+    // Build nav once; on subsequent calls just update active class without recreating buttons.
+    if (!nav.dataset.built) {
+      nav.innerHTML = '';
+      (state.bootstrap.navigation || []).forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'nav-button';
+        button.textContent = item.label;
+        button.dataset.navKey = item.key;
+        button.onclick = () => updateRoute({ page: item.key, studentId: '', settingsTab: '', filter: '', q: '' });
+        nav.appendChild(button);
+      });
+      nav.dataset.built = '1';
+    }
+    Array.from(nav.querySelectorAll('[data-nav-key]')).forEach((btn) => {
+      const isActive = state.route.page === btn.dataset.navKey || (btn.dataset.navKey === 'students' && state.route.page === 'student-profile');
+      btn.className = 'nav-button' + (isActive ? ' active' : '');
     });
   }
 
@@ -214,12 +230,12 @@
       </section>` : ''}
     `;
 
+    const guard = getRenderGuard();
     const cached = getCached('dashboard');
-    const dataPromise = cached
-      ? Promise.resolve(cached)
-      : callServer({ path: '/api/dashboard', method: 'get' }).then((data) => { setCached('dashboard', data); return data; });
 
-    dataPromise.then((data) => {
+    function paintDashboard(data) {
+      if (!guard()) return;
+      setCached('dashboard', data);
       const headline = data.headline || {};
       document.getElementById('headlineCards').innerHTML = [
         ['Students', headline.student_count || 0],
@@ -267,7 +283,14 @@
           </article>`).join('') || '<p class="muted">No open safeguarding concerns.</p>';
         bindStudentLinks();
       }
-    });
+    }
+
+    if (cached) {
+      paintDashboard(cached);
+      callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard).catch(() => {});
+    } else {
+      callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard);
+    }
   }
 
   function renderStudentsPage() {
@@ -394,10 +417,11 @@
 
     const studentCacheKey = 'students:' + (state.route.q || '') + ':' + (state.route.filter || '');
     const cachedStudents = getCached(studentCacheKey);
-    const studentsPromise = cachedStudents
-      ? Promise.resolve(cachedStudents)
-      : callServer({ path: '/api/students', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then((data) => { setCached(studentCacheKey, data); return data; });
-    studentsPromise.then((data) => {
+    const guard = getRenderGuard();
+
+    function paintStudents(data) {
+      if (!guard()) return;
+      setCached(studentCacheKey, data);
       const students = data.students || [];
       if (!students.length) {
         document.getElementById('studentTable').innerHTML = '<p class="muted">No students matched this view.</p>';
@@ -421,7 +445,14 @@
       Array.from(document.querySelectorAll('[data-student-id]')).forEach((row) => {
         row.onclick = () => updateRoute({ page: 'student-profile', studentId: row.dataset.studentId });
       });
-    });
+    }
+
+    if (cachedStudents) {
+      paintStudents(cachedStudents);
+      callServer({ path: '/api/students', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then(paintStudents).catch(() => {});
+    } else {
+      callServer({ path: '/api/students', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then(paintStudents);
+    }
   }
 
   function profileActionForm(action, data) {
@@ -774,7 +805,9 @@
       return;
     }
     target.innerHTML = '<section class="panel"><p class="muted">Loading profile...</p></section>';
+    const profileGuard = getRenderGuard();
     callServer({ path: '/api/students/' + encodeURIComponent(state.route.studentId), method: 'get' }).then((data) => {
+      if (!profileGuard()) return;
       state.profileData = data;
       const student = data.profile;
       const actionButtons = [
@@ -881,9 +914,12 @@
     document.getElementById('listView').onclick = () => updateRoute({ page: 'meetings', view: 'list' });
     document.getElementById('applyMeetingFilter').onclick = () => updateRoute({ page: 'meetings', q: document.getElementById('meetingSearchPage').value, filter: document.getElementById('meetingFilterPage').value });
 
+    const meetingGuard = getRenderGuard();
     callServer({ path: '/api/meetings', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then((data) => {
+      if (!meetingGuard()) return;
       const meetings = data.meetings || [];
       const host = document.getElementById('meetingViewHost');
+      if (!host) return;
       if (state.route.view === 'list') {
         host.innerHTML = `<div class="list compact-list">${meetings.map(renderMeetingRecord).join('') || '<p class="muted">No visible meetings.</p>'}</div>`;
         bindStudentLinks();
@@ -938,15 +974,32 @@
     const target = document.getElementById('settingsPage');
     const tab = state.route.settingsTab || 'users';
     const tabs = [['users', 'Users'], ['user-roles', 'Role Assignment'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['filters', 'Saved Filters'], ['audit', 'Audit Log']];
-    target.innerHTML = `
-      <section class="panel compact-panel"><div class="tabs">${tabs.map(([key, label]) => `<button class="button ${tab === key ? '' : 'secondary'}" data-settings-tab="${key}">${label}</button>`).join('')}</div></section>
-      <section class="panel compact-panel" id="settingsBody">${skeletonRows(8)}</section>`;
-    Array.from(target.querySelectorAll('[data-settings-tab]')).forEach((button) => button.onclick = () => updateRoute({ page: 'settings', settingsTab: button.dataset.settingsTab }));
-    const cachedRef = getCached('settings:reference');
-    const refPromise = cachedRef
-      ? Promise.resolve(cachedRef)
-      : callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => { setCached('settings:reference', data); return data; });
-    refPromise.then((data) => {
+
+    // Build the tab bar shell once — never destroy it so clicks always register.
+    if (!target.dataset.built) {
+      target.innerHTML = `
+        <section class="panel compact-panel"><div class="tabs" id="settingsTabs"></div></section>
+        <div id="settingsBody">${skeletonRows(8)}</div>`;
+      const tabsEl = target.querySelector('#settingsTabs');
+      tabs.forEach(([key, label]) => {
+        const btn = document.createElement('button');
+        btn.dataset.settingsTab = key;
+        btn.textContent = label;
+        btn.onclick = () => updateRoute({ page: 'settings', settingsTab: key });
+        tabsEl.appendChild(btn);
+      });
+      target.dataset.built = '1';
+    }
+
+    // Update active tab button immediately — no wait.
+    Array.from(target.querySelectorAll('[data-settings-tab]')).forEach((btn) => {
+      btn.className = 'button ' + (btn.dataset.settingsTab === tab ? '' : 'secondary');
+    });
+
+    const guard = getRenderGuard();
+
+    function paintTab(data) {
+      if (!guard()) return;
       const bodyByTab = {
         users: renderUsersSettings(data),
         'user-roles': renderUserRolesSettings(data),
@@ -956,10 +1009,26 @@
         filters: renderSavedFiltersSettings(data),
         audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
       };
-      document.getElementById('settingsBody').outerHTML = bodyByTab[tab] || '';
+      document.getElementById('settingsBody').outerHTML = '<div id="settingsBody">' + (bodyByTab[tab] || '') + '</div>';
       bindSettingsForms();
       if (tab === 'audit') loadAuditLog();
-    });
+    }
+
+    const cachedRef = getCached('settings:reference');
+    if (cachedRef) {
+      // Paint immediately from cache, then silently refresh in background.
+      paintTab(cachedRef);
+      callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
+        setCached('settings:reference', data);
+        paintTab(data);
+      }).catch(() => {});
+    } else {
+      document.getElementById('settingsBody').innerHTML = skeletonRows(8);
+      callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
+        setCached('settings:reference', data);
+        paintTab(data);
+      });
+    }
   }
 
   function renderUsersSettings(data) {
