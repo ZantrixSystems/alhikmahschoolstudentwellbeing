@@ -964,20 +964,7 @@
               ${c.outcome_summary ? `<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(c.outcome_summary)}</p>` : ''}
               ${c.closed_at ? `<p class="muted small"><strong>Closed:</strong> ${escapeHtml(formatDate(c.closed_at, true))}</p>` : ''}
               ${linkedFuHtml}
-              ${linkedNotesHtml}
-              <div class="concern-inline-form">
-                <p class="eyebrow" style="margin-bottom:6px">Add follow-up for this concern</p>
-                <div class="form-grid">
-                  <input class="concern-fu-title" placeholder="Follow-up title" data-concern-id="${escapeHtml(c.id)}">
-                  <input class="concern-fu-due" type="date" data-concern-id="${escapeHtml(c.id)}">
-                  <select class="concern-fu-priority" data-concern-id="${escapeHtml(c.id)}">
-                    <option value="low">Low</option>
-                    <option value="medium" selected>Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                  <button class="button concern-fu-submit" data-concern-id="${escapeHtml(c.id)}" data-team-id="${escapeHtml(c.team_id || '')}">Add</button>
-                </div>
-              </div>`}
+              ${linkedNotesHtml}`}
             </div>` : '';
           return `
             <div class="concern-card" data-concern-card-id="${escapeHtml(c.id)}">
@@ -1046,26 +1033,6 @@
               referralOutcome: referralOutcomeEl ? referralOutcomeEl.value : null,
               incidentType: incidentTypeEl ? incidentTypeEl.value : null,
               sanctionType: sanctionTypeEl ? sanctionTypeEl.value : null,
-            });
-          };
-        });
-        host.querySelectorAll('.concern-fu-submit').forEach((btn) => {
-          btn.onclick = () => {
-            const concernId = btn.dataset.concernId;
-            const teamId = btn.dataset.teamId;
-            const titleEl = host.querySelector(`.concern-fu-title[data-concern-id="${concernId}"]`);
-            const dueEl = host.querySelector(`.concern-fu-due[data-concern-id="${concernId}"]`);
-            const priorityEl = host.querySelector(`.concern-fu-priority[data-concern-id="${concernId}"]`);
-            const title = titleEl ? titleEl.value : '';
-            if (!title.trim()) return;
-            postProfile('/api/follow-ups', {
-              studentId,
-              title,
-              summary: title,
-              priority: priorityEl ? priorityEl.value : 'medium',
-              dueAt: dueEl ? dueEl.value : '',
-              teamId,
-              concernId,
             });
           };
         });
