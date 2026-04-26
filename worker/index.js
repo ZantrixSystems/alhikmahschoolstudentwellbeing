@@ -1284,7 +1284,6 @@ function createApi(env, actorEmail) {
     );
     if (!existing) throw new AppError('Reference option not found', 404);
     assertManagedReferenceField(existing.area_key, existing.field_key);
-    if (existing.is_system) throw new AppError('System reference options can be deactivated but not deleted', 400);
     const referenceOption = await queryOne(
       'UPDATE reference_options SET is_active = FALSE, deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING *',
       [auth.userId, body.referenceOptionId]

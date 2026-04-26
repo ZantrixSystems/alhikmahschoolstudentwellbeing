@@ -1461,7 +1461,7 @@
         <td>${escapeHtml(o.label)}</td>
         <td>${escapeHtml(String(o.sort_order || 0))}</td>
         <td><span class="badge ${o.is_active ? '' : 'secondary'}">${o.is_active ? 'Active' : 'Inactive'}</span></td>
-        <td>${o.is_system ? '<span class="muted small">System</span>' : `<button class="text-button" data-delete-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}">Delete</button>`}</td>
+        <td><button class="text-button" data-delete-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}">Delete</button></td>
       </tr>`).join('');
     const tabs = fields.map((f) => `<button class="tab-btn${f.key === selectedField ? ' active' : ''}" data-dropdown-field="${escapeHtml(f.key)}">${escapeHtml(f.label)}</button>`).join('');
     return `
