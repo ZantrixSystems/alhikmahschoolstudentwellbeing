@@ -74,12 +74,14 @@
     });
   }
 
+  const ROUTE_SESSION_KEY = 'ahw_route';
+
   function parseRoute() {
     let parsed = {};
     try {
-      const raw = window.location.hash.slice(1);
-      if (raw) parsed = JSON.parse(decodeURIComponent(raw));
-    } catch (e) { /* ignore malformed hash */ }
+      const raw = sessionStorage.getItem(ROUTE_SESSION_KEY);
+      if (raw) parsed = JSON.parse(raw);
+    } catch (e) { /* sessionStorage unavailable or corrupt */ }
     state.route = {
       page: parsed.page || 'dashboard',
       studentId: parsed.studentId || '',
@@ -97,16 +99,7 @@
       if (next[key]) current[key] = next[key];
       else delete current[key];
     });
-    // Strip defaults to keep hash short
-    if (current.page === 'dashboard') delete current.page;
-    if (!current.studentId) delete current.studentId;
-    if (!current.q) delete current.q;
-    if (!current.filter) delete current.filter;
-    if (current.filterMode === 'builder') delete current.filterMode;
-    if (current.view === 'calendar') delete current.view;
-    if (current.settingsTab === 'users') delete current.settingsTab;
-    const hash = Object.keys(current).length ? encodeURIComponent(JSON.stringify(current)) : '';
-    window.history.pushState({}, '', '#' + hash);
+    try { sessionStorage.setItem(ROUTE_SESSION_KEY, JSON.stringify(current)); } catch (e) {}
     parseRoute();
     renderRoute();
   }
@@ -1834,7 +1827,6 @@
   }
 
   window.addEventListener('popstate', () => { parseRoute(); renderRoute(); });
-  window.addEventListener('hashchange', () => { parseRoute(); renderRoute(); });
 
   bootstrapApp();
 </script>
