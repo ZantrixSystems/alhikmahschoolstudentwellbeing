@@ -1407,40 +1407,47 @@
   }
 
   function renderVisibilitySettings(data) {
-    const teamOptions = (data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-    const rows = (data.visibilityRules || []).map((r) => `
-      <tr>
-        <td>${escapeHtml(r.source_team_name)}</td>
-        <td>${escapeHtml(r.target_team_name)}</td>
-        <td>${escapeHtml(friendlyLabel(r.content_type))}</td>
-        <td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td>
-        <td><button class="text-button" data-edit-rule
-          data-id="${escapeHtml(r.id)}"
-          data-source="${escapeHtml(r.source_team_id)}"
-          data-target="${escapeHtml(r.target_team_id)}"
-          data-content="${escapeHtml(r.content_type)}"
-          data-level="${escapeHtml(r.visibility_level)}">Edit</button>
-          <button class="text-button" data-delete-rule
-            data-id="${escapeHtml(r.id)}"
-            data-label="${escapeHtml(r.source_team_name + ' to ' + r.target_team_name + ' / ' + friendlyLabel(r.content_type))}">Delete</button></td>
-      </tr>`).join('');
+    const teams = (data.teams || []).filter((t) => t.is_active !== false);
+    // Build a lookup: "sourceId|targetId" -> array of rule ids
+    const ruleMap = {};
+    (data.visibilityRules || []).forEach((r) => {
+      const key = r.source_team_id + '|' + r.target_team_id;
+      if (!ruleMap[key]) ruleMap[key] = [];
+      ruleMap[key].push(r.id);
+    });
+    const headerCells = teams.map((t) => `<th style="text-align:center;min-width:80px">${escapeHtml(t.name)}</th>`).join('');
+    const bodyRows = teams.map((src) => {
+      const cells = teams.map((tgt) => {
+        if (src.id === tgt.id) return `<td style="text-align:center;color:var(--sage)">●</td>`;
+        const ruleIds = ruleMap[src.id + '|' + tgt.id] || [];
+        const checked = ruleIds.length > 0;
+        return `<td style="text-align:center">
+          <button class="visibility-toggle ${checked ? 'active' : ''}"
+            data-source-id="${escapeHtml(src.id)}"
+            data-target-id="${escapeHtml(tgt.id)}"
+            data-rule-ids="${escapeHtml(ruleIds.join(','))}"
+            title="${escapeHtml(src.name)} data visible to ${escapeHtml(tgt.name)}"
+            style="width:28px;height:28px;border-radius:50%;border:2px solid ${checked ? 'var(--sage)' : 'var(--border)'};background:${checked ? 'var(--sage)' : 'transparent'};cursor:pointer;font-size:14px">
+            ${checked ? '✓' : ''}
+          </button>
+        </td>`;
+      }).join('');
+      return `<tr><td><strong>${escapeHtml(src.name)}</strong><br><span class="muted small">their data →</span></td>${cells}</tr>`;
+    }).join('');
     return `
       <article class="panel compact-panel">
         <div class="panel-header">
-          <div><h3 class="section-title">Team Sharing</h3></div>
-          <button class="button secondary" id="addRuleToggle">+ Add rule</button>
-        </div>
-        <div id="visibilityRuleForm" class="inline-form hidden" style="margin-bottom:10px">
-          <div class="form-grid">
-            <select id="visibilitySource">${teamOptions}</select>
-            <select id="visibilityTarget">${teamOptions}</select>
-            <select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select>
-            <select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select>
-            <button class="button" id="saveVisibilityButton">Save rule</button>
-            <button class="button secondary" id="cancelVisibilityButton">Cancel</button>
+          <div>
+            <h3 class="section-title">Team Sharing</h3>
+            <p class="muted small">Rows = whose data. Columns = who can see it. ● = own data (always visible). Click to grant or revoke access.</p>
           </div>
         </div>
-        <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Whose data</th><th>Who can see it</th><th>What they can see</th><th>How much</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="table-scroll">
+          <table class="data-table dense-table">
+            <thead><tr><th></th>${headerCells}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
       </article>`;
   }
 
@@ -1542,30 +1549,23 @@
     if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { bustCache('settings:reference'); showMessage('Role saved.'); });
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
-    const ruleForm = document.getElementById('visibilityRuleForm');
-    const addRuleToggle = document.getElementById('addRuleToggle');
-    const cancelVisibilityButton = document.getElementById('cancelVisibilityButton');
-    if (addRuleToggle) addRuleToggle.onclick = () => { ruleForm.classList.remove('hidden'); addRuleToggle.classList.add('hidden'); };
-    if (cancelVisibilityButton) cancelVisibilityButton.onclick = () => { ruleForm.classList.add('hidden'); addRuleToggle.classList.remove('hidden'); };
-    const saveVisibilityButton = document.getElementById('saveVisibilityButton');
-    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule saved.'); });
-    Array.from(document.querySelectorAll('[data-edit-rule]')).forEach((btn) => {
+    const CONTENT_TYPES = ['concerns', 'meetings', 'actions', 'chronology', 'radar'];
+    Array.from(document.querySelectorAll('.visibility-toggle')).forEach((btn) => {
       btn.onclick = () => {
-        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-        setVal('visibilitySource', btn.dataset.source);
-        setVal('visibilityTarget', btn.dataset.target);
-        setVal('visibilityContent', btn.dataset.content);
-        setVal('visibilityLevel', btn.dataset.level);
-        ruleForm.classList.remove('hidden');
-        addRuleToggle.classList.add('hidden');
-        ruleForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      };
-    });
-    Array.from(document.querySelectorAll('[data-delete-rule]')).forEach((btn) => {
-      btn.onclick = () => {
-        if (!confirm('Delete sharing rule: ' + btn.dataset.label + '?')) return;
-        callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: btn.dataset.id } })
-          .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule deleted.'); });
+        const ruleIds = (btn.dataset.ruleIds || '').split(',').filter(Boolean);
+        const sourceId = btn.dataset.sourceId;
+        const targetId = btn.dataset.targetId;
+        if (ruleIds.length) {
+          // Already granted — delete all rules for this pair
+          Promise.all(ruleIds.map((id) =>
+            callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: id } })
+          )).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); });
+        } else {
+          // Grant — upsert a rule for each content type at full visibility
+          Promise.all(CONTENT_TYPES.map((ct) =>
+            callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType: ct, visibilityLevel: 'full' } })
+          )).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); });
+        }
       };
     });
     Array.from(document.querySelectorAll('[data-dropdown-field]')).forEach((btn) => {
