@@ -818,6 +818,12 @@ function createApi(env, actorEmail) {
     ) : [];
     concernsRaw.forEach(c => { c.linkedFollowUps = linkedActions.filter(a => a.concern_id === c.id); });
 
+    const linkedNotes = canViewNotes ? await query(
+      'SELECT n.id, n.concern_id, n.summary AS title, n.summary, n.body, n.created_at, t.name AS team_name FROM notes n LEFT JOIN teams t ON t.id = n.team_id WHERE n.student_id = $1 AND n.concern_id IS NOT NULL AND n.deleted_at IS NULL ORDER BY n.created_at DESC',
+      [studentId]
+    ) : [];
+    concernsRaw.forEach(c => { c.linkedNotes = linkedNotes.filter(n => n.concern_id === c.id); });
+
     // Derive radar badges from open concerns (does not replace the radar table query)
     const derivedRadar = {};
     (concernsRaw || [])
@@ -928,6 +934,49 @@ function createApi(env, actorEmail) {
     return { concern };
   }
 
+  async function updateConcern(auth, concernId, body) {
+    await assertPermission(auth, 'concerns.create');
+    const existing = await queryOne('SELECT * FROM concerns WHERE id = $1 AND deleted_at IS NULL', [concernId]);
+    if (!existing) throw new AppError('Concern not found', 404);
+    if (existing.status === 'closed') throw new AppError('Closed concerns cannot be edited', 400);
+
+    const referralType = body.referralType !== undefined ? body.referralType : existing.referral_type;
+    if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) throw new AppError('Invalid referral_type: ' + referralType);
+    const incidentType = body.incidentType !== undefined ? body.incidentType : existing.incident_type;
+    if (incidentType && !VALID_INCIDENT_TYPES.includes(incidentType)) throw new AppError('Invalid incident_type: ' + incidentType);
+    const sanctionType = body.sanctionType !== undefined ? body.sanctionType : existing.sanction_type;
+    if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) throw new AppError('Invalid sanction_type: ' + sanctionType);
+
+    const concern = await queryOne(
+      [
+        'UPDATE concerns SET',
+        '  title = $1, summary = $2, severity = $3, category = $4,',
+        '  referral_type = $5, referral_date = $6, referral_outcome = $7,',
+        '  incident_type = $8, sanction_type = $9, sanction_duration = $10,',
+        '  behaviour_plan_active = $11,',
+        '  updated_at = NOW(), updated_by = $12',
+        'WHERE id = $13 AND deleted_at IS NULL RETURNING *',
+      ].join('\n'),
+      [
+        body.title || existing.title,
+        body.summary || existing.summary,
+        body.severity || existing.severity,
+        body.category || existing.category,
+        referralType,
+        body.referralDate !== undefined ? (body.referralDate || null) : existing.referral_date,
+        body.referralOutcome !== undefined ? (body.referralOutcome || null) : existing.referral_outcome,
+        incidentType || null,
+        sanctionType || null,
+        body.sanctionDuration !== undefined ? (body.sanctionDuration || null) : existing.sanction_duration,
+        body.behaviourPlanActive !== undefined ? body.behaviourPlanActive === true : existing.behaviour_plan_active,
+        auth.userId,
+        concernId,
+      ]
+    );
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'update', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { severity: body.severity } });
+    return { concern };
+  }
+
   async function createSendPlan(auth, body) {
     await assertPermission(auth, 'send.manage');
     if (!body.studentId || !body.planType) throw new AppError('studentId and planType are required');
@@ -994,10 +1043,10 @@ function createApi(env, actorEmail) {
     if (!body.studentId || !body.summary || !body.body) throw new AppError('studentId, summary, and body are required');
     const note = await queryOne(
       [
-        'INSERT INTO notes (student_id, team_id, author_user_id, note_type, visibility_level, confidentiality_level, summary, body, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $3, $3) RETURNING *',
+        'INSERT INTO notes (student_id, team_id, author_user_id, note_type, visibility_level, confidentiality_level, summary, body, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $3, $3) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, auth.userId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body]
+      [body.studentId, body.teamId || null, auth.userId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body, body.concernId || null]
     );
     await addChronology(auth, body.studentId, 'notes', note.id, 'note_added', body.teamId, body.summary, body.summary, body.body, body.visibilityLevel || 'summary');
     return { note };
@@ -1211,6 +1260,7 @@ function createApi(env, actorEmail) {
     if (method === 'get' && /^\/api\/students\/[^/]+$/.test(path)) return getStudentProfilePayload(auth, path.split('/')[3]);
     if (method === 'post' && path === '/api/concerns') return createConcern(auth, payload);
     if (method === 'post' && /^\/api\/concerns\/[^/]+\/close$/.test(path)) return closeConcern(auth, path.split('/')[3], payload);
+    if (method === 'post' && /^\/api\/concerns\/[^/]+\/update$/.test(path)) return updateConcern(auth, path.split('/')[3], payload);
     if (method === 'post' && path === '/api/send-plans') return createSendPlan(auth, payload);
     if (method === 'get' && path === '/api/meetings') return getMeetingsPayload(auth, requestQuery);
     if (method === 'post' && path === '/api/meetings') return createMeeting(auth, payload);

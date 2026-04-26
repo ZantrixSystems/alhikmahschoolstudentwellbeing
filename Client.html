@@ -460,13 +460,22 @@
     const teams = (state.bootstrap.teams || []).map((team) => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
     const studentId = state.route.studentId;
     const forms = {
-      note: `
+      note: (() => {
+        const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
+        const concernLinkSelect = openConcerns.length ? `
+          <select id="noteConcernId" class="span-2">
+            <option value="">Not linked to a concern</option>
+            ${openConcerns.map((c) => `<option value="${escapeHtml(c.id)}">[${escapeHtml(c.severity)}] ${escapeHtml(c.title)}</option>`).join('')}
+          </select>` : '';
+        return `
         <div class="form-grid">
           <input id="noteSummary" class="span-2" placeholder="Short note summary">
           <textarea id="noteBody" class="span-2" rows="3" placeholder="Support note"></textarea>
           <select id="noteTeam"><option value="">No team</option>${teams}</select>
+          ${concernLinkSelect}
           <button class="button" id="submitNote">Add note</button>
-        </div>`,
+        </div>`;
+      })(),
       meeting: `
         <div class="form-grid">
           <input id="meetingTitle" placeholder="Meeting title">
@@ -613,6 +622,7 @@
       summary: document.getElementById('noteSummary').value,
       body: document.getElementById('noteBody').value,
       teamId: document.getElementById('noteTeam').value,
+      concernId: document.getElementById('noteConcernId')?.value || null,
     });
     const meetingType = document.getElementById('meetingType');
     const meetingExternalFields = document.getElementById('meetingExternalFields');
@@ -857,6 +867,7 @@
 
     if (tab === 'concerns') {
       const expandedConcerns = new Set();
+      const editingConcerns = new Set();
       const allConcerns = (data.concerns || []).slice().sort((a, b) => {
         const aOpen = ['open','triage','escalated'].includes(a.status) ? 0 : 1;
         const bOpen = ['open','triage','escalated'].includes(b.status) ? 0 : 1;
@@ -868,6 +879,7 @@
         return allConcerns.map((c) => {
           const isOpen = ['open','triage','escalated'].includes(c.status);
           const isExpanded = expandedConcerns.has(c.id);
+          const isEditing = editingConcerns.has(c.id);
           const linkedFuHtml = (c.linkedFollowUps && c.linkedFollowUps.length) ? `
             <div class="concern-linked-followups">
               <p class="eyebrow" style="margin-bottom:4px">Linked Follow-ups</p>
@@ -881,13 +893,78 @@
                   <p class="muted small">${fu.due_at ? 'Due ' + escapeHtml(formatDate(fu.due_at, true)) : 'No due date'}</p>
                 </div>`).join('')}
             </div>` : '';
+          const linkedNotes = c.linkedNotes || [];
+          const linkedNotesHtml = linkedNotes.length ? `
+            <div class="concern-linked-followups">
+              <p class="eyebrow" style="margin-bottom:4px">Notes</p>
+              ${linkedNotes.map((n) => `
+                <div class="active-strip-item" style="margin-bottom:4px">
+                  <strong>${escapeHtml(n.summary || n.title)}</strong>
+                  <p class="muted small">${escapeHtml(n.body || '')}${n.team_name ? ' | ' + escapeHtml(n.team_name) : ''} | ${escapeHtml(formatDate(n.created_at))}</p>
+                </div>`).join('')}
+            </div>` : '';
+          const editFormHtml = isEditing ? `
+            <div class="concern-edit-form" data-concern-edit-id="${escapeHtml(c.id)}">
+              <p class="eyebrow" style="margin-bottom:6px">Edit concern</p>
+              <div class="form-grid">
+                <input class="span-2 concern-edit-title" data-concern-id="${escapeHtml(c.id)}" value="${escapeHtml(c.title)}">
+                <select class="concern-edit-severity" data-concern-id="${escapeHtml(c.id)}">
+                  <option value="low"${c.severity === 'low' ? ' selected' : ''}>Low</option>
+                  <option value="medium"${c.severity === 'medium' ? ' selected' : ''}>Medium</option>
+                  <option value="high"${c.severity === 'high' ? ' selected' : ''}>High</option>
+                </select>
+                <select class="concern-edit-status" data-concern-id="${escapeHtml(c.id)}">
+                  <option value="open"${c.status === 'open' ? ' selected' : ''}>Open</option>
+                  <option value="triage"${c.status === 'triage' ? ' selected' : ''}>Triage</option>
+                  <option value="escalated"${c.status === 'escalated' ? ' selected' : ''}>Escalated</option>
+                </select>
+                <textarea class="span-2 concern-edit-summary" rows="3" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.summary || '')}</textarea>
+                ${c.category === 'safeguarding' ? `
+                <select class="concern-edit-referral-type" data-concern-id="${escapeHtml(c.id)}">
+                  <option value="none"${(c.referral_type || 'none') === 'none' ? ' selected' : ''}>No referral made</option>
+                  <option value="mash"${c.referral_type === 'mash' ? ' selected' : ''}>MASH referral</option>
+                  <option value="lado"${c.referral_type === 'lado' ? ' selected' : ''}>LADO referral</option>
+                  <option value="police"${c.referral_type === 'police' ? ' selected' : ''}>Police</option>
+                  <option value="early_help"${c.referral_type === 'early_help' ? ' selected' : ''}>Early help</option>
+                  <option value="camhs"${c.referral_type === 'camhs' ? ' selected' : ''}>CAMHS</option>
+                  <option value="social_care"${c.referral_type === 'social_care' ? ' selected' : ''}>Social care</option>
+                  <option value="other"${c.referral_type === 'other' ? ' selected' : ''}>Other</option>
+                </select>
+                <textarea class="span-2 concern-edit-referral-outcome" rows="2" placeholder="Referral outcome (optional)" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.referral_outcome || '')}</textarea>` : ''}
+                ${c.category === 'behaviour' ? `
+                <select class="concern-edit-incident-type" data-concern-id="${escapeHtml(c.id)}">
+                  <option value="">Incident type</option>
+                  <option value="verbal"${c.incident_type === 'verbal' ? ' selected' : ''}>Verbal abuse / aggression</option>
+                  <option value="physical"${c.incident_type === 'physical' ? ' selected' : ''}>Physical aggression</option>
+                  <option value="disruption"${c.incident_type === 'disruption' ? ' selected' : ''}>Persistent disruption</option>
+                  <option value="bullying"${c.incident_type === 'bullying' ? ' selected' : ''}>Bullying</option>
+                  <option value="online"${c.incident_type === 'online' ? ' selected' : ''}>Online / cyberbullying</option>
+                  <option value="damage"${c.incident_type === 'damage' ? ' selected' : ''}>Property damage</option>
+                  <option value="substance"${c.incident_type === 'substance' ? ' selected' : ''}>Substance related</option>
+                  <option value="other"${c.incident_type === 'other' ? ' selected' : ''}>Other</option>
+                </select>
+                <select class="concern-edit-sanction-type" data-concern-id="${escapeHtml(c.id)}">
+                  <option value="none"${(c.sanction_type || 'none') === 'none' ? ' selected' : ''}>No sanction</option>
+                  <option value="verbal_warning"${c.sanction_type === 'verbal_warning' ? ' selected' : ''}>Verbal warning</option>
+                  <option value="detention"${c.sanction_type === 'detention' ? ' selected' : ''}>Detention</option>
+                  <option value="isolation"${c.sanction_type === 'isolation' ? ' selected' : ''}>Internal isolation</option>
+                  <option value="ftes"${c.sanction_type === 'ftes' ? ' selected' : ''}>Fixed-term exclusion</option>
+                  <option value="managed_move"${c.sanction_type === 'managed_move' ? ' selected' : ''}>Managed move</option>
+                  <option value="permanent_exclusion"${c.sanction_type === 'permanent_exclusion' ? ' selected' : ''}>Permanent exclusion</option>
+                </select>` : ''}
+                <button class="button concern-edit-save" data-concern-id="${escapeHtml(c.id)}" data-category="${escapeHtml(c.category || '')}">Save</button>
+                <button class="button secondary concern-edit-cancel" data-concern-id="${escapeHtml(c.id)}">Cancel</button>
+              </div>
+            </div>` : '';
           const bodyHtml = isExpanded ? `
             <div class="concern-card-body">
+              ${isEditing ? editFormHtml : `
               <p>${escapeHtml(c.summary || 'No summary.')}</p>
               ${c.referral_type && c.referral_type !== 'none' ? `<p class="muted small"><strong>Referral:</strong> ${escapeHtml(c.referral_type.toUpperCase())}</p>` : ''}
               ${c.outcome_summary ? `<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(c.outcome_summary)}</p>` : ''}
               ${c.closed_at ? `<p class="muted small"><strong>Closed:</strong> ${escapeHtml(formatDate(c.closed_at, true))}</p>` : ''}
               ${linkedFuHtml}
+              ${linkedNotesHtml}
               <div class="concern-inline-form">
                 <p class="eyebrow" style="margin-bottom:6px">Add follow-up for this concern</p>
                 <div class="form-grid">
@@ -900,7 +977,7 @@
                   </select>
                   <button class="button concern-fu-submit" data-concern-id="${escapeHtml(c.id)}" data-team-id="${escapeHtml(c.team_id || '')}">Add</button>
                 </div>
-              </div>
+              </div>`}
             </div>` : '';
           return `
             <div class="concern-card" data-concern-card-id="${escapeHtml(c.id)}">
@@ -910,6 +987,7 @@
                 <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
                 ${concernStatusBadge(c.status)}
                 <span class="muted small">${escapeHtml(formatDate(c.created_at, true))}</span>
+                ${isOpen ? `<button class="button secondary concern-edit-toggle" data-concern-id="${escapeHtml(c.id)}" style="margin-left:auto">Edit</button>` : ''}
               </div>
               ${bodyHtml}
             </div>`;
@@ -920,12 +998,55 @@
 
       function bindConcernCards() {
         host.querySelectorAll('[data-toggle-concern]').forEach((el) => {
-          el.onclick = () => {
+          el.onclick = (e) => {
+            if (e.target.closest('.concern-edit-toggle')) return;
             const id = el.dataset.toggleConcern;
             if (expandedConcerns.has(id)) expandedConcerns.delete(id);
             else expandedConcerns.add(id);
             document.getElementById('concernCardsContainer').innerHTML = renderConcernCards();
             bindConcernCards();
+          };
+        });
+        host.querySelectorAll('.concern-edit-toggle').forEach((btn) => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.concernId;
+            expandedConcerns.add(id);
+            if (editingConcerns.has(id)) editingConcerns.delete(id);
+            else editingConcerns.add(id);
+            document.getElementById('concernCardsContainer').innerHTML = renderConcernCards();
+            bindConcernCards();
+          };
+        });
+        host.querySelectorAll('.concern-edit-cancel').forEach((btn) => {
+          btn.onclick = () => {
+            editingConcerns.delete(btn.dataset.concernId);
+            document.getElementById('concernCardsContainer').innerHTML = renderConcernCards();
+            bindConcernCards();
+          };
+        });
+        host.querySelectorAll('.concern-edit-save').forEach((btn) => {
+          btn.onclick = () => {
+            const id = btn.dataset.concernId;
+            const category = btn.dataset.category;
+            const titleEl = host.querySelector(`.concern-edit-title[data-concern-id="${id}"]`);
+            const severityEl = host.querySelector(`.concern-edit-severity[data-concern-id="${id}"]`);
+            const statusEl = host.querySelector(`.concern-edit-status[data-concern-id="${id}"]`);
+            const summaryEl = host.querySelector(`.concern-edit-summary[data-concern-id="${id}"]`);
+            const referralTypeEl = host.querySelector(`.concern-edit-referral-type[data-concern-id="${id}"]`);
+            const referralOutcomeEl = host.querySelector(`.concern-edit-referral-outcome[data-concern-id="${id}"]`);
+            const incidentTypeEl = host.querySelector(`.concern-edit-incident-type[data-concern-id="${id}"]`);
+            const sanctionTypeEl = host.querySelector(`.concern-edit-sanction-type[data-concern-id="${id}"]`);
+            postProfile('/api/concerns/' + encodeURIComponent(id) + '/update', {
+              title: titleEl ? titleEl.value : '',
+              severity: severityEl ? severityEl.value : '',
+              status: statusEl ? statusEl.value : '',
+              summary: summaryEl ? summaryEl.value : '',
+              referralType: referralTypeEl ? referralTypeEl.value : null,
+              referralOutcome: referralOutcomeEl ? referralOutcomeEl.value : null,
+              incidentType: incidentTypeEl ? incidentTypeEl.value : null,
+              sanctionType: sanctionTypeEl ? sanctionTypeEl.value : null,
+            });
           };
         });
         host.querySelectorAll('.concern-fu-submit').forEach((btn) => {
