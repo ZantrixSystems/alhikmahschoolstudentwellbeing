@@ -1152,6 +1152,7 @@
             <p class="muted">${escapeHtml(student.student_code)} | ${escapeHtml(student.year_group || 'No year')} | ${escapeHtml(student.tutor_group || student.form_group || 'No class')}</p>
           </div>
           <div class="badge-row">${(data.derivedRadar || []).filter((r) => ['active', 'monitoring'].includes(r.status)).map((r) => radarBadge({ teamKey: r.team_key, teamName: r.team_name })).join('') || '<span class="muted small">No active radar</span>'}</div>
+          ${hasPermission('students.manage') ? `<button class="button secondary" id="deleteStudentBtn" style="margin-top:6px;align-self:flex-end;color:#c0392b;border-color:#c0392b">Delete student</button>` : ''}
         </section>
         <section class="profile-actions">
           ${actionButtons.map(([key, label]) => `<button class="button ${state.activeProfileAction === key ? '' : 'secondary'}" data-profile-action="${key}">${label}</button>`).join('')}
@@ -1172,6 +1173,16 @@
         <div id="profileTabContent"></div>
       `;
       document.getElementById('backToStudents').onclick = () => updateRoute({ page: 'students', studentId: '' });
+      const deleteStudentBtn = document.getElementById('deleteStudentBtn');
+      if (deleteStudentBtn) {
+        deleteStudentBtn.onclick = () => {
+          const name = studentName(student);
+          if (!confirm('Permanently delete ' + name + '? This cannot be undone.')) return;
+          callServer({ path: '/api/students/' + student.id + '/delete', method: 'post', payload: {} })
+            .then(() => { showMessage(name + ' deleted.'); updateRoute({ page: 'students', studentId: '' }); })
+            .catch((e) => showMessage('Delete failed: ' + e.message, 'error'));
+        };
+      }
       Array.from(document.querySelectorAll('[data-profile-action]')).forEach((button) => {
         button.onclick = () => {
           state.activeProfileAction = state.activeProfileAction === button.dataset.profileAction ? '' : button.dataset.profileAction;

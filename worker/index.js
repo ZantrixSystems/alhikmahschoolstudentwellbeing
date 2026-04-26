@@ -39,7 +39,7 @@ export default {
       return json({
         ok: false,
         error: {
-          message: error.message,
+          message: status >= 500 ? 'Worker request failed' : error.message,
           details: error.details || null,
         },
       }, status);
@@ -712,7 +712,11 @@ function createApi(env, actorEmail) {
     const students = await query(
       [
         'SELECT s.id, s.student_code, s.first_name, s.last_name, s.preferred_name,',
-        '  s.year_group, COALESCE(s.tutor_group, s.form_group) AS tutor_group, s.current_status,',
+        "  CASE WHEN s.date_of_birth IS NOT NULL THEN 'Year ' || (",
+        '    (EXTRACT(YEAR FROM NOW())::int - CASE WHEN EXTRACT(MONTH FROM NOW())::int < 9 THEN 1 ELSE 0 END)',
+        '    - (EXTRACT(YEAR FROM s.date_of_birth)::int + CASE WHEN EXTRACT(MONTH FROM s.date_of_birth)::int >= 9 THEN 5 ELSE 4 END)',
+        "  )::text ELSE s.year_group END AS year_group,",
+        '  COALESCE(s.tutor_group, s.form_group) AS tutor_group, s.current_status,',
         '  latest.latest_activity_at, latest.open_follow_up, latest.has_open_concern, MIN(lead.display_name) AS lead_name,',
         '  COALESCE(JSON_AGG(DISTINCT JSONB_BUILD_OBJECT(',
         "    'teamName', t.name, 'teamKey', t.team_key, 'status', str.status, 'severity', str.severity, 'addedAt', str.added_at",
@@ -761,12 +765,27 @@ function createApi(env, actorEmail) {
     return { student };
   }
 
+  async function deleteStudent(auth, studentId) {
+    await assertPermission(auth, 'students.delete');
+    if (!studentId) throw new AppError('studentId is required');
+    const student = await queryOne('SELECT id FROM students WHERE id = $1 AND deleted_at IS NULL', [studentId]);
+    if (!student) throw new AppError('Student not found', 404);
+    await queryOne('UPDATE students SET deleted_at = NOW(), updated_by = $1 WHERE id = $2 RETURNING id', [auth.userId, studentId]);
+    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'delete', entityType: 'student', entityId: studentId, studentId });
+    return { ok: true };
+  }
+
   async function getStudentProfilePayload(auth, studentId) {
     await assertPermission(auth, 'students.view');
     const permissionKeys = await getEffectivePermissionKeys(auth);
     const student = await queryOne(
       [
-        'SELECT s.*, COALESCE(JSON_AGG(DISTINCT JSONB_BUILD_OBJECT(',
+        'SELECT s.*,',
+        "  CASE WHEN s.date_of_birth IS NOT NULL THEN 'Year ' || (",
+        '    (EXTRACT(YEAR FROM NOW())::int - CASE WHEN EXTRACT(MONTH FROM NOW())::int < 9 THEN 1 ELSE 0 END)',
+        '    - (EXTRACT(YEAR FROM s.date_of_birth)::int + CASE WHEN EXTRACT(MONTH FROM s.date_of_birth)::int >= 9 THEN 5 ELSE 4 END)',
+        "  )::text ELSE s.year_group END AS year_group,",
+        '  COALESCE(JSON_AGG(DISTINCT JSONB_BUILD_OBJECT(',
         "  'id', f.id, 'flagKey', f.flag_key, 'label', f.label, 'severity', f.severity, 'visibilityLevel', f.visibility_level",
         " )) FILTER (WHERE f.id IS NOT NULL AND f.deleted_at IS NULL AND f.is_active = TRUE), '[]'::json) AS flags",
         'FROM students s',
@@ -1447,6 +1466,7 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/follow-ups') return createFollowUp(auth, payload);
     if (method === 'post' && path === '/api/radar') return addRadar(auth, payload);
     if (method === 'post' && path === '/api/students/status') return updateStudentStatus(auth, payload);
+    if (method === 'post' && /^\/api\/students\/[^/]+\/delete$/.test(path)) return deleteStudent(auth, path.split('/')[3]);
     if (method === 'get' && path === '/api/settings/reference') return getSettingsReferencePayload(auth);
     if (method === 'post' && path === '/api/settings/users') return saveUser(auth, payload);
     if (method === 'post' && path === '/api/settings/users/delete') return deleteUser(auth, payload);
