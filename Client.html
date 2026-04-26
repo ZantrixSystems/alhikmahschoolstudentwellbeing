@@ -325,12 +325,13 @@
             ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">Add student</button>' : ''}
           </div>
         </div>
-        <div id="newStudentForm" class="inline-form hidden">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input id="directorySearch" placeholder="Search by name or ID..." style="flex:1;min-width:200px" autocomplete="off">
-            <button class="button secondary" id="cancelNewStudent">Cancel</button>
+        <div id="newStudentForm" class="inline-form hidden" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:8px">
+          <p class="eyebrow" style="margin-bottom:8px">Find student</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="directorySearch" class="search-input" placeholder="Type name or student ID…" style="flex:1;border-radius:8px" autocomplete="off">
+            <button class="button secondary" id="cancelNewStudent" style="white-space:nowrap">Cancel</button>
           </div>
-          <div id="directoryResults" style="margin-top:6px"></div>
+          <div id="directoryResults" style="margin-top:8px;border-radius:8px;overflow:hidden"></div>
         </div>
         <div class="student-filter-shell">
         <div id="builderFilters" class="filter-builder ${isAdvanced ? 'hidden' : ''}">
@@ -371,16 +372,18 @@
       toggle.classList.add('hidden');
       const dirSearch = document.getElementById('directorySearch');
       if (dirSearch) dirSearch.focus();
-      // Load directory on first open
+      // Load directory on first open — fetch all students from DB
       if (!state.directoryCache) {
-        document.getElementById('directoryResults').innerHTML = '<p class="muted small">Loading directory...</p>';
-        google.script.run
-          .withSuccessHandler((result) => {
-            state.directoryCache = result.students || [];
-            if (result.error) showMessage('Directory: ' + result.error, 'error');
-          })
-          .withFailureHandler(() => showMessage('Could not load student directory.', 'error'))
-          .getStudentDirectory();
+        document.getElementById('directoryResults').innerHTML = '<p class="muted small" style="padding:8px 12px">Loading…</p>';
+        callServer({ path: '/api/students', method: 'get', query: { q: '', filter: '' } }).then((data) => {
+          state.directoryCache = (data.students || []).map((s) => ({
+            studentCode: s.student_code,
+            firstName: s.first_name,
+            lastName: s.last_name,
+            id: s.id,
+          }));
+          document.getElementById('directoryResults').innerHTML = '';
+        }).catch(() => showMessage('Could not load student directory.', 'error'));
       }
     };
     const cancelNewStudent = document.getElementById('cancelNewStudent');
@@ -396,28 +399,39 @@
       const results = document.getElementById('directoryResults');
       if (!q) { results.innerHTML = ''; return; }
       const dir = state.directoryCache || [];
-      if (!dir.length) { results.innerHTML = '<p class="muted small">Directory still loading...</p>'; return; }
+      if (!dir.length) { results.innerHTML = '<p class="muted small" style="padding:8px 12px">Directory still loading…</p>'; return; }
       const matches = dir.filter((s) =>
         (s.firstName + ' ' + s.lastName).toLowerCase().includes(q) || s.studentCode.toLowerCase().includes(q)
-      ).slice(0, 10);
-      if (!matches.length) { results.innerHTML = '<p class="muted small">No matches in directory.</p>'; return; }
+      ).slice(0, 8);
+      if (!matches.length) { results.innerHTML = '<p class="muted small" style="padding:8px 12px">No students found matching that name or ID.</p>'; return; }
       results.innerHTML = matches.map((s) => `
-        <div class="directory-result" data-student-code="${escapeHtml(s.studentCode)}" data-first="${escapeHtml(s.firstName)}" data-last="${escapeHtml(s.lastName)}"
-          style="padding:6px 10px;cursor:pointer;border-radius:4px;display:flex;justify-content:space-between;align-items:center">
-          <span><strong>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</strong> <span class="muted small">${escapeHtml(s.studentCode)}</span></span>
-          <button class="button" style="font-size:12px;padding:2px 10px">Add</button>
+        <div class="directory-result" data-student-id="${escapeHtml(s.id || '')}" data-student-code="${escapeHtml(s.studentCode)}" data-first="${escapeHtml(s.firstName)}" data-last="${escapeHtml(s.lastName)}"
+          style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);transition:background 0.1s">
+          <span>
+            <strong>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</strong>
+            <span class="muted small" style="margin-left:8px">${escapeHtml(s.studentCode)}</span>
+          </span>
+          <span class="badge" style="background:var(--sage);color:#fff;border-radius:6px;padding:2px 10px;font-size:12px">Select</span>
         </div>`).join('');
       results.querySelectorAll('.directory-result').forEach((row) => {
+        row.onmouseenter = () => row.style.background = 'var(--surface-raised, #f5f5f5)';
+        row.onmouseleave = () => row.style.background = '';
         row.onclick = () => {
-          const code = row.dataset.studentCode;
-          const first = row.dataset.first;
-          const last = row.dataset.last;
-          callServer({ path: '/api/students', method: 'post', payload: { studentCode: code, firstName: first, lastName: last } })
-            .then((result) => {
-              newStudentForm.classList.add('hidden');
-              if (toggle) toggle.classList.remove('hidden');
-              updateRoute({ page: 'student-profile', studentId: result.student.id });
-            });
+          const studentId = row.dataset.studentId;
+          if (studentId) {
+            newStudentForm.classList.add('hidden');
+            if (toggle) toggle.classList.remove('hidden');
+            document.getElementById('directorySearch').value = '';
+            document.getElementById('directoryResults').innerHTML = '';
+            updateRoute({ page: 'student-profile', studentId });
+          } else {
+            callServer({ path: '/api/students', method: 'post', payload: { studentCode: row.dataset.studentCode, firstName: row.dataset.first, lastName: row.dataset.last } })
+              .then((result) => {
+                newStudentForm.classList.add('hidden');
+                if (toggle) toggle.classList.remove('hidden');
+                updateRoute({ page: 'student-profile', studentId: result.student.id });
+              });
+          }
         };
       });
     };
