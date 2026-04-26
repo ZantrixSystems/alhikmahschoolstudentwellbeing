@@ -963,10 +963,64 @@
   }
 
   function renderUsersSettings(data) {
+    const teamOptions = (data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    const userTeams = data.userTeams || [];
+    const userRoles = data.userRoles || [];
+    const rows = (data.users || []).map((u) => {
+      const teams = userTeams.filter((ut) => ut.user_id === u.id).map((ut) => `<span class="chip">${escapeHtml(ut.team_name)}</span>`).join('') || '<span class="muted small">No teams</span>';
+      const roles = userRoles.filter((ur) => ur.user_id === u.id).map((ur) => `<span class="chip">${escapeHtml(ur.role_name)}</span>`).join('') || '<span class="muted small">No roles</span>';
+      return `<tr>
+        <td><strong>${escapeHtml(u.display_name)}</strong><br><span class="muted small">${escapeHtml(u.email)}</span></td>
+        <td>${teams}</td>
+        <td>${roles}</td>
+        <td><span class="badge ${u.is_active ? '' : 'secondary'}">${u.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td><button class="text-button" data-edit-user
+          data-id="${escapeHtml(u.id)}"
+          data-email="${escapeHtml(u.email)}"
+          data-name="${escapeHtml(u.display_name)}"
+          data-active="${u.is_active}">Edit</button></td>
+      </tr>`;
+    }).join('');
     return `
-      <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Users</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th></tr></thead><tbody>${(data.users || []).map((u) => `<tr><td>${escapeHtml(u.display_name)}</td><td>${escapeHtml(u.email)}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td></tr>`).join('')}</tbody></table></div></article>
-        <article class="panel compact-panel"><h3 class="section-title">Add User</h3><div class="form-grid"><input id="userEmail" class="span-2" placeholder="user@school.org"><input id="userDisplayName" class="span-2" placeholder="Display name"><select id="userPrimaryTeam">${(data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select><select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select><button class="button span-2" id="saveUserButton">Save user</button></div></article>
+      <article class="panel compact-panel">
+        <div class="panel-header">
+          <div><h3 class="section-title">Users</h3></div>
+          <button class="button secondary" id="addUserToggle">+ Add user</button>
+        </div>
+        <div id="userForm" class="inline-form hidden" style="margin-bottom:10px">
+          <div class="form-grid">
+            <input id="userEmail" placeholder="user@school.org">
+            <input id="userDisplayName" placeholder="Display name">
+            <select id="userPrimaryTeam"><option value="">No primary team</option>${teamOptions}</select>
+            <select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+            <button class="button" id="saveUserButton">Save</button>
+            <button class="button secondary" id="cancelUserButton">Cancel</button>
+          </div>
+        </div>
+        <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Teams</th><th>Roles</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      </article>
+      <div id="userEditPanel" class="hidden">
+        <div class="two-col" style="margin-top:10px">
+          <article class="panel compact-panel">
+            <h3 class="section-title" id="userEditTitle">Edit User</h3>
+            <div class="form-grid">
+              <input id="editUserEmail" class="span-2" placeholder="Email" disabled>
+              <input id="editUserDisplayName" class="span-2" placeholder="Display name">
+              <select id="editUserPrimaryTeam" class="span-2"><option value="">No primary team</option>${teamOptions}</select>
+              <select id="editUserActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+              <button class="button" id="saveEditUserButton">Save changes</button>
+              <button class="button secondary span-2" id="cancelEditUserButton">Cancel</button>
+            </div>
+          </article>
+          <article class="panel compact-panel">
+            <h3 class="section-title">Team Membership</h3>
+            <p class="muted small" style="margin-bottom:8px">These are the teams this user belongs to. They can see records from all their teams.</p>
+            <div id="editUserTeamList" class="list compact-list" style="margin-bottom:10px"></div>
+            <div class="form-grid">
+              <select id="editUserTeamAdd" class="span-2"><option value="">Add to a team...</option>${teamOptions}</select>
+            </div>
+          </article>
+        </div>
       </div>`;
   }
 
@@ -1057,8 +1111,61 @@
   }
 
   function bindSettingsForms() {
+    // Add user toggle
+    const addUserToggle = document.getElementById('addUserToggle');
+    const userForm = document.getElementById('userForm');
+    const cancelUserButton = document.getElementById('cancelUserButton');
+    if (addUserToggle) addUserToggle.onclick = () => { userForm.classList.remove('hidden'); addUserToggle.classList.add('hidden'); };
+    if (cancelUserButton) cancelUserButton.onclick = () => { userForm.classList.add('hidden'); addUserToggle.classList.remove('hidden'); };
     const saveUserButton = document.getElementById('saveUserButton');
-    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('User saved.'); });
+    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User saved.'); });
+
+    // Edit existing user
+    const userEditPanel = document.getElementById('userEditPanel');
+    const cancelEditUserButton = document.getElementById('cancelEditUserButton');
+    if (cancelEditUserButton) cancelEditUserButton.onclick = () => userEditPanel.classList.add('hidden');
+    const saveEditUserButton = document.getElementById('saveEditUserButton');
+    if (saveEditUserButton) saveEditUserButton.onclick = () => {
+      const userId = saveEditUserButton.dataset.userId;
+      callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('editUserEmail').value, displayName: document.getElementById('editUserDisplayName').value, primaryTeamId: document.getElementById('editUserPrimaryTeam').value, isActive: document.getElementById('editUserActive').value === 'true' } })
+        .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User updated.'); });
+    };
+
+    // Edit user — populate panel
+    Array.from(document.querySelectorAll('[data-edit-user]')).forEach((btn) => {
+      btn.onclick = () => {
+        const userId = btn.dataset.id;
+        document.getElementById('editUserEmail').value = btn.dataset.email;
+        document.getElementById('editUserDisplayName').value = btn.dataset.name;
+        document.getElementById('editUserActive').value = btn.dataset.active === 'true' ? 'true' : 'false';
+        document.getElementById('saveEditUserButton').dataset.userId = userId;
+        // Populate team membership list
+        const cachedRef = getCached('settings:reference');
+        const userTeams = (cachedRef && cachedRef.userTeams || []).filter((ut) => ut.user_id === userId);
+        const allTeams = (cachedRef && cachedRef.teams || []);
+        document.getElementById('editUserTeamList').innerHTML = userTeams.length
+          ? userTeams.map((ut) => `<div class="list-row compact-row" style="cursor:default"><header><div><h4>${escapeHtml(ut.team_name)}</h4></div><button class="text-button" data-remove-team data-user-id="${escapeHtml(userId)}" data-team-id="${escapeHtml(ut.team_id)}">Remove</button></header></div>`).join('')
+          : '<p class="muted small">Not in any teams yet.</p>';
+        // Set primary team
+        const primaryTeamSel = document.getElementById('editUserPrimaryTeam');
+        const user = (cachedRef && cachedRef.users || []).find((u) => u.id === userId);
+        if (user && primaryTeamSel) primaryTeamSel.value = user.primary_team_id || '';
+        userEditPanel.classList.remove('hidden');
+        userEditPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Bind remove team buttons
+        Array.from(document.querySelectorAll('[data-remove-team]')).forEach((rb) => {
+          rb.onclick = () => callServer({ path: '/api/settings/user-teams', method: 'post', payload: { userId: rb.dataset.userId, teamId: rb.dataset.teamId, action: 'remove' } })
+            .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('Team removed.'); });
+        });
+        // Bind add team select
+        const addTeamSel = document.getElementById('editUserTeamAdd');
+        if (addTeamSel) addTeamSel.onchange = (e) => {
+          if (!e.target.value) return;
+          callServer({ path: '/api/settings/user-teams', method: 'post', payload: { userId, teamId: e.target.value, action: 'assign' } })
+            .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('Team assigned.'); });
+        };
+      };
+    });
     const assignRoleButton = document.getElementById('assignRoleButton');
     if (assignRoleButton) assignRoleButton.onclick = () => callServer({ path: '/api/settings/user-roles', method: 'post', payload: { userId: document.getElementById('urUserId').value, roleId: document.getElementById('urRoleId').value, action: 'assign' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'user-roles' }); });
     const removeRoleButton = document.getElementById('removeRoleButton');

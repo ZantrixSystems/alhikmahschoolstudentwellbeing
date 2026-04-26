@@ -1100,8 +1100,21 @@ function createApi(env, actorEmail) {
       query('SELECT tvr.id, tvr.source_team_id, source_team.name AS source_team_name, tvr.target_team_id, target_team.name AS target_team_name, tvr.content_type, tvr.visibility_level FROM team_visibility_rules tvr JOIN teams source_team ON source_team.id = tvr.source_team_id JOIN teams target_team ON target_team.id = tvr.target_team_id WHERE tvr.deleted_at IS NULL ORDER BY source_team.name, target_team.name, tvr.content_type'),
       query('SELECT id, area_key, name, filter_expression, is_shared FROM saved_filters WHERE deleted_at IS NULL ORDER BY area_key, name'),
       query('SELECT ur.user_id, ur.role_id, u.display_name AS user_name, u.email AS user_email, r.role_key, r.name AS role_name FROM user_roles ur JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL ORDER BY u.display_name, r.name'),
+      query('SELECT ut.user_id, ut.team_id, t.name AS team_name FROM user_teams ut JOIN teams t ON t.id = ut.team_id AND t.deleted_at IS NULL ORDER BY t.name'),
     ]);
-    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles };
+    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams };
+  }
+
+  async function assignUserTeam(auth, body) {
+    await assertPermission(auth, 'settings.users.manage');
+    if (!body.userId || !body.teamId) throw new AppError('userId and teamId are required');
+    if (body.action === 'remove') {
+      await query('DELETE FROM user_teams WHERE user_id = $1 AND team_id = $2', [body.userId, body.teamId]);
+    } else {
+      await query('INSERT INTO user_teams (user_id, team_id, created_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [body.userId, body.teamId, auth.userId]);
+    }
+    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: body.action === 'remove' ? 'team.remove' : 'team.assign', entityType: 'user_team', entityId: body.userId, metadata: { teamId: body.teamId } });
+    return { ok: true };
   }
 
   async function assignUserRole(auth, body) {
@@ -1191,6 +1204,7 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/settings/teams') return saveTeam(auth, payload);
     if (method === 'post' && path === '/api/settings/visibility-rules') return saveVisibilityRule(auth, payload);
     if (method === 'post' && path === '/api/settings/user-roles') return assignUserRole(auth, payload);
+    if (method === 'post' && path === '/api/settings/user-teams') return assignUserTeam(auth, payload);
     if (method === 'post' && path === '/api/saved-filters') return saveFilter(auth, payload);
     if (method === 'get' && path === '/api/audit-logs') return getAuditLogsPayload(auth);
     throw new AppError('Route not found: ' + path, 404);
