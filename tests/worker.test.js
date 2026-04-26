@@ -21,6 +21,7 @@ function makeEnv(options = {}) {
   const chronologyRows = options.chronologyRows || [];
   const teamRows = options.teamRows || [];
   const userTeamRows = options.userTeamRows || [];
+  const userRowsById = options.userRowsById || [];
 
   const env = {
     WORKER_SHARED_SECRET: 'test-secret',
@@ -43,6 +44,9 @@ function makeEnv(options = {}) {
           role_keys: roleKeys,
           team_ids: teamIds,
         }];
+      }
+      if (sql.includes('WHERE u.id = $1 AND u.deleted_at IS NULL')) {
+        return userRowsById.filter((user) => user.id === params[0]);
       }
       if (sql.includes('SELECT DISTINCT p.permission_key')) {
         return permissions.map((permission_key) => ({ permission_key }));
@@ -68,6 +72,9 @@ function makeEnv(options = {}) {
         return visibilityRules;
       }
       if (sql.includes('FROM user_teams ut')) return userTeamRows;
+      if (sql.includes('DELETE FROM user_roles')) return [];
+      if (sql.includes('DELETE FROM user_teams')) return [];
+      if (sql.includes('UPDATE users SET is_active = FALSE')) return [{ id: params[1], email: 'removed@example.org', display_name: 'Removed User' }];
       if (sql.includes('INSERT INTO audit_logs')) return [];
       return [];
     },
@@ -80,6 +87,14 @@ test('permission enforcement denies missing student permission', async () => {
   await assert.rejects(
     () => api.dispatch({ path: '/api/students', method: 'get', query: {} }),
     /Missing permission: students\.view/
+  );
+});
+
+test('user with no roles has no default app access', async () => {
+  const api = createApi(makeEnv({ permissions: [], roleKeys: [] }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({ path: '/api/bootstrap', method: 'get' }),
+    /Missing permission: dashboard\.view/
   );
 });
 
@@ -347,6 +362,31 @@ test('settings reference includes user team assignments', async () => {
   }), 'worker.test@alhikmah.example.org');
   const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
   assert.deepEqual(data.userTeams, [{ user_id: USER_ID, team_id: SOURCE_TEAM, team_name: 'Pastoral' }]);
+});
+
+test('settings user delete soft-deletes non-admin accounts', async () => {
+  const targetUserId = '66666666-6666-6666-6666-666666666666';
+  const env = makeEnv({
+    permissions: ['settings.users.manage'],
+    userRowsById: [{ id: targetUserId, email: 'target@example.org', display_name: 'Target User', role_keys: ['caseworker'] }],
+  });
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({ path: '/api/settings/users/delete', method: 'post', payload: { userId: targetUserId } });
+  assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_roles') && call.params[0] === targetUserId));
+  assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_teams') && call.params[0] === targetUserId));
+  assert.ok(env.calls.some((call) => call.sql.includes('UPDATE users SET is_active = FALSE') && call.params[1] === targetUserId));
+});
+
+test('settings user delete protects admin accounts', async () => {
+  const targetUserId = '77777777-7777-7777-7777-777777777777';
+  const api = createApi(makeEnv({
+    permissions: ['settings.users.manage'],
+    userRowsById: [{ id: targetUserId, email: 'admin@example.org', display_name: 'Admin User', role_keys: ['admin'] }],
+  }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({ path: '/api/settings/users/delete', method: 'post', payload: { userId: targetUserId } }),
+    /Admin accounts cannot be deleted/
+  );
 });
 
 test('referral fields are redacted at summary visibility', () => {

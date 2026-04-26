@@ -1219,7 +1219,33 @@ function createApi(env, actorEmail) {
   async function saveUser(auth, body) {
     await assertPermission(auth, 'settings.users.manage');
     if (!body.email || !body.displayName) throw new AppError('email and displayName are required');
-    const user = await queryOne('INSERT INTO users (email, display_name, primary_team_id, is_active, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, primary_team_id = EXCLUDED.primary_team_id, is_active = EXCLUDED.is_active, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [String(body.email).toLowerCase(), body.displayName, body.primaryTeamId || null, body.isActive !== false, auth.userId]);
+    const user = await queryOne('INSERT INTO users (email, display_name, primary_team_id, is_active, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, primary_team_id = EXCLUDED.primary_team_id, is_active = EXCLUDED.is_active, deleted_at = NULL, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [String(body.email).toLowerCase(), body.displayName, body.primaryTeamId || null, body.isActive !== false, auth.userId]);
+    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: 'upsert', entityType: 'user', entityId: user.id, metadata: { email: user.email, isActive: user.is_active } });
+    return { user };
+  }
+
+  async function deleteUser(auth, body) {
+    await assertPermission(auth, 'settings.users.manage');
+    if (!body.userId) throw new AppError('userId is required');
+    if (body.userId === auth.userId) throw new AppError('You cannot delete your own account', 400);
+    const existing = await queryOne(
+      [
+        'SELECT u.id, u.email, u.display_name,',
+        "  COALESCE(ARRAY_AGG(DISTINCT r.role_key) FILTER (WHERE r.role_key IS NOT NULL), ARRAY[]::text[]) AS role_keys",
+        'FROM users u',
+        'LEFT JOIN user_roles ur ON ur.user_id = u.id',
+        'LEFT JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL',
+        'WHERE u.id = $1 AND u.deleted_at IS NULL',
+        'GROUP BY u.id',
+      ].join('\n'),
+      [body.userId]
+    );
+    if (!existing) throw new AppError('User not found', 404);
+    if ((existing.role_keys || []).includes('admin')) throw new AppError('Admin accounts cannot be deleted', 400);
+    await query('DELETE FROM user_roles WHERE user_id = $1', [body.userId]);
+    await query('DELETE FROM user_teams WHERE user_id = $1', [body.userId]);
+    const user = await queryOne('UPDATE users SET is_active = FALSE, primary_team_id = NULL, deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id, email, display_name', [auth.userId, body.userId]);
+    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: 'delete', entityType: 'user', entityId: body.userId, metadata: { email: existing.email } });
     return { user };
   }
 
@@ -1288,6 +1314,7 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/students/status') return updateStudentStatus(auth, payload);
     if (method === 'get' && path === '/api/settings/reference') return getSettingsReferencePayload(auth);
     if (method === 'post' && path === '/api/settings/users') return saveUser(auth, payload);
+    if (method === 'post' && path === '/api/settings/users/delete') return deleteUser(auth, payload);
     if (method === 'post' && path === '/api/settings/roles') return saveRole(auth, payload);
     if (method === 'post' && path === '/api/settings/teams') return saveTeam(auth, payload);
     if (method === 'post' && path === '/api/settings/visibility-rules') return saveVisibilityRule(auth, payload);

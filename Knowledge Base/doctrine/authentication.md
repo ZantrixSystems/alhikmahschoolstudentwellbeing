@@ -40,6 +40,8 @@ After signature verification, the Worker hashes the nonce and inserts it into `s
 - A user must exist in `users`.
 - The user must be active.
 - The user must have an effective permission for the requested action.
+- Newly created users have no roles or teams unless explicitly assigned, so their default access is none.
+- Deleted users are soft-deleted, deactivated, removed from roles and teams, and no longer resolve during authentication.
 - The built-in `admin` role remains fixed and full access.
 
 ## Future Hardening

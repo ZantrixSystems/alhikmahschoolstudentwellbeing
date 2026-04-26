@@ -30,3 +30,10 @@ Safeguarding.
 The `concerns.category` column is retained as a backend compatibility field for now. It can be
 removed in a later migration once reporting, tests, and any historical dashboards no longer rely
 on it.
+
+## Follow-up access-control fix
+
+- Added soft-delete support for Settings > Users.
+- Deleted users are deactivated, assigned roles and teams are removed, and `deleted_at` prevents authentication.
+- Re-adding the same email clears `deleted_at` but does not restore old roles or teams.
+- Confirmed default access remains none: a user record without assigned roles has no app permissions.

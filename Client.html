@@ -1357,6 +1357,7 @@
               <select id="editUserPrimaryTeam" class="span-2"><option value="">No primary team</option>${teamOptions}</select>
               <select id="editUserActive"><option value="true">Active</option><option value="false">Inactive</option></select>
               <button class="button" id="saveEditUserButton">Save changes</button>
+              <button class="button secondary" id="deleteUserButton">Delete user</button>
               <button class="button secondary span-2" id="cancelEditUserButton">Cancel</button>
             </div>
           </article>
@@ -1473,10 +1474,18 @@
     const cancelEditUserButton = document.getElementById('cancelEditUserButton');
     if (cancelEditUserButton) cancelEditUserButton.onclick = () => userEditPanel.classList.add('hidden');
     const saveEditUserButton = document.getElementById('saveEditUserButton');
+    const deleteUserButton = document.getElementById('deleteUserButton');
     if (saveEditUserButton) saveEditUserButton.onclick = () => {
       const userId = saveEditUserButton.dataset.userId;
       callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('editUserEmail').value, displayName: document.getElementById('editUserDisplayName').value, primaryTeamId: document.getElementById('editUserPrimaryTeam').value, isActive: document.getElementById('editUserActive').value === 'true' } })
         .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User updated.'); });
+    };
+    if (deleteUserButton) deleteUserButton.onclick = () => {
+      const userId = deleteUserButton.dataset.userId;
+      const email = document.getElementById('editUserEmail').value;
+      if (!confirm('Delete access for ' + email + '?')) return;
+      callServer({ path: '/api/settings/users/delete', method: 'post', payload: { userId } })
+        .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User deleted.'); });
     };
 
     // Edit user — populate panel
@@ -1487,6 +1496,7 @@
         document.getElementById('editUserDisplayName').value = btn.dataset.name;
         document.getElementById('editUserActive').value = btn.dataset.active === 'true' ? 'true' : 'false';
         document.getElementById('saveEditUserButton').dataset.userId = userId;
+        document.getElementById('deleteUserButton').dataset.userId = userId;
         // Populate team membership list
         const cachedRef = getCached('settings:reference');
         const userTeams = (cachedRef && cachedRef.userTeams || []).filter((ut) => ut.user_id === userId);

@@ -13,6 +13,8 @@
 - Custom roles are editable through Settings
 - Roles grant permissions for app areas and actions
 - Teams do not grant permissions; they scope operational visibility
+- User records alone do not grant access; a user requires assigned roles with permissions
+- Removing a user in Settings soft-deletes and deactivates the user and removes their roles and teams
 
 ## Enforcement Layers
 
@@ -23,4 +25,4 @@
 
 ## Auditing
 
-- Role changes, user-role assignments, visibility-rule changes, and sensitive reads are written to `audit_logs`
+- User creation/deletion, role changes, user-role assignments, visibility-rule changes, and sensitive reads are written to `audit_logs`
