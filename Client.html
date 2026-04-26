@@ -5,7 +5,25 @@
     activeProfileAction: '',
     profileData: null,
     profileSaving: false,
+    pageCache: {},
   };
+
+  const PAGE_CACHE_TTL = 60000;
+
+  function getCached(key) {
+    const entry = state.pageCache[key];
+    if (!entry) return null;
+    if (Date.now() - entry.ts > PAGE_CACHE_TTL) { delete state.pageCache[key]; return null; }
+    return entry.data;
+  }
+
+  function setCached(key, data) {
+    state.pageCache[key] = { ts: Date.now(), data };
+  }
+
+  function bustCache(key) {
+    delete state.pageCache[key];
+  }
 
   function setStatus(text) {
     const el = document.getElementById('globalStatus');
@@ -196,13 +214,18 @@
       </section>` : ''}
     `;
 
-    callServer({ path: '/api/dashboard', method: 'get' }).then((data) => {
+    const cached = getCached('dashboard');
+    const dataPromise = cached
+      ? Promise.resolve(cached)
+      : callServer({ path: '/api/dashboard', method: 'get' }).then((data) => { setCached('dashboard', data); return data; });
+
+    dataPromise.then((data) => {
       const headline = data.headline || {};
       document.getElementById('headlineCards').innerHTML = [
         ['Students', headline.student_count || 0],
         ['Open Concerns', headline.open_concern_count || 0],
         ['Active Radars', headline.active_radar_count || 0],
-        ['Open Follow-ups', headline.open_action_count || 0],
+        ['My Open Follow-ups', headline.open_action_count || 0],
       ].map(([label, value]) => `
         <article class="card metric-card">
           <p class="eyebrow">${escapeHtml(label)}</p>
@@ -219,6 +242,10 @@
             <span class="badge blue">${escapeHtml(team.active_students)} active</span>
           </header>
         </article>`).join('');
+
+      document.getElementById('dashboardUpcoming').innerHTML =
+        (data.upcomingFollowUps || []).map(renderMeetingRecord).join('') || '<p class="muted">No open follow-ups assigned to you.</p>';
+      bindStudentLinks();
 
       const dslList = document.getElementById('dslConcernList');
       if (dslList) {
@@ -241,15 +268,6 @@
         bindStudentLinks();
       }
     });
-    if (hasPermission('meetings.view')) {
-      callServer({ path: '/api/meetings', method: 'get', query: { filter: 'type==follow_up;status=in=(open,in_progress)' } }).then((data) => {
-        const upcoming = (data.meetings || []).slice(0, 6);
-        document.getElementById('dashboardUpcoming').innerHTML = upcoming.map(renderMeetingRecord).join('') || '<p class="muted">No upcoming follow-ups.</p>';
-        bindStudentLinks();
-      });
-    } else {
-      document.getElementById('dashboardUpcoming').innerHTML = '<p class="muted">No upcoming follow-ups.</p>';
-    }
   }
 
   function renderStudentsPage() {
@@ -344,6 +362,7 @@
         payload: { areaKey: 'students', name, filterExpression: document.getElementById('studentFilter').value },
       }).then(() => {
         showMessage('Filter saved.');
+        bustCache('settings:reference');
         bootstrapApp();
       });
     };
@@ -373,7 +392,12 @@
       };
     }
 
-    callServer({ path: '/api/students', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then((data) => {
+    const studentCacheKey = 'students:' + (state.route.q || '') + ':' + (state.route.filter || '');
+    const cachedStudents = getCached(studentCacheKey);
+    const studentsPromise = cachedStudents
+      ? Promise.resolve(cachedStudents)
+      : callServer({ path: '/api/students', method: 'get', query: { q: state.route.q, filter: state.route.filter } }).then((data) => { setCached(studentCacheKey, data); return data; });
+    studentsPromise.then((data) => {
       const students = data.students || [];
       if (!students.length) {
         document.getElementById('studentTable').innerHTML = '<p class="muted">No students matched this view.</p>';
@@ -656,7 +680,8 @@
       button.disabled = true;
     });
     callServer({ path, method: 'post', payload }).then(() => {
-      showMessage('Profile updated.');
+      showMessage('Saved.');
+      bustCache('dashboard');
       state.activeProfileAction = '';
       document.getElementById('profileActionHost').innerHTML = '';
       Array.from(document.querySelectorAll('[data-profile-action]')).forEach((btn) => {
@@ -879,7 +904,7 @@
               ${grouped[day].map((meeting) => `
                 <button class="calendar-event" data-student-link="${meeting.student_id}">
                   <strong>${escapeHtml(meeting.title)}</strong>
-                  <span>${escapeHtml(meeting.first_name)} ${escapeHtml(meeting.last_name)} | ${escapeHtml(meeting.item_status || meeting.interaction_type)}</span>
+                  <span>${escapeHtml(meeting.first_name)} ${escapeHtml(meeting.last_name)} | ${escapeHtml(friendlyLabel(meeting.item_status || meeting.interaction_type))}</span>
                 </button>`).join('')}
             </article>`).join('') || '<p class="muted">No visible calendar items.</p>'}
         </div>`;
@@ -895,7 +920,7 @@
             <h4>${escapeHtml(item.title)}</h4>
             <p class="muted">${escapeHtml(item.first_name)} ${escapeHtml(item.last_name)} | ${escapeHtml(item.team_name || 'No team')} | ${escapeHtml(item.assigned_user_name || 'Unassigned')}</p>
           </div>
-          <span class="badge blue">${escapeHtml(item.item_type || item.interaction_type)}</span>
+          <span class="badge blue">${escapeHtml(friendlyLabel(item.item_type || item.interaction_type))}</span>
         </header>
         <p>${escapeHtml(item.summary)}</p>
         <p class="muted small">${escapeHtml(item.item_status || 'scheduled')} | ${escapeHtml(formatDate(item.calendar_at || item.occurred_at))}</p>
@@ -912,21 +937,26 @@
     setPageTitle('Settings');
     const target = document.getElementById('settingsPage');
     const tab = state.route.settingsTab || 'users';
-    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Visibility'], ['filters', 'Filters'], ['audit', 'Audit']];
+    const tabs = [['users', 'Users'], ['user-roles', 'Role Assignment'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['filters', 'Saved Filters'], ['audit', 'Audit Log']];
     target.innerHTML = `
       <section class="panel compact-panel"><div class="tabs">${tabs.map(([key, label]) => `<button class="button ${tab === key ? '' : 'secondary'}" data-settings-tab="${key}">${label}</button>`).join('')}</div></section>
       <section class="panel compact-panel" id="settingsBody">${skeletonRows(8)}</section>`;
     Array.from(target.querySelectorAll('[data-settings-tab]')).forEach((button) => button.onclick = () => updateRoute({ page: 'settings', settingsTab: button.dataset.settingsTab }));
-    callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
+    const cachedRef = getCached('settings:reference');
+    const refPromise = cachedRef
+      ? Promise.resolve(cachedRef)
+      : callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => { setCached('settings:reference', data); return data; });
+    refPromise.then((data) => {
       const bodyByTab = {
         users: renderUsersSettings(data),
+        'user-roles': renderUserRolesSettings(data),
         roles: renderRolesSettings(data),
         teams: renderTeamsSettings(data),
         visibility: renderVisibilitySettings(data),
         filters: renderSavedFiltersSettings(data),
         audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
       };
-      document.getElementById('settingsBody').outerHTML = bodyByTab[tab];
+      document.getElementById('settingsBody').outerHTML = bodyByTab[tab] || '';
       bindSettingsForms();
       if (tab === 'audit') loadAuditLog();
     });
@@ -937,6 +967,38 @@
       <div class="two-col">
         <article class="panel compact-panel"><h3 class="section-title">Users</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Email</th><th>Status</th></tr></thead><tbody>${(data.users || []).map((u) => `<tr><td>${escapeHtml(u.display_name)}</td><td>${escapeHtml(u.email)}</td><td>${u.is_active ? 'Active' : 'Inactive'}</td></tr>`).join('')}</tbody></table></div></article>
         <article class="panel compact-panel"><h3 class="section-title">Add User</h3><div class="form-grid"><input id="userEmail" class="span-2" placeholder="user@school.org"><input id="userDisplayName" class="span-2" placeholder="Display name"><select id="userPrimaryTeam">${(data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select><select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select><button class="button span-2" id="saveUserButton">Save user</button></div></article>
+      </div>`;
+  }
+
+  function renderUserRolesSettings(data) {
+    const users = data.users || [];
+    const roles = data.roles || [];
+    const userRoles = data.userRoles || [];
+    const byUser = {};
+    users.forEach((u) => { byUser[u.id] = { user: u, roleIds: [] }; });
+    userRoles.forEach((ur) => { if (byUser[ur.user_id]) byUser[ur.user_id].roleIds.push(ur.role_id); });
+    const userOptions = users.map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.display_name)} &lt;${escapeHtml(u.email)}&gt;</option>`).join('');
+    const roleOptions = roles.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+    const rows = users.map((u) => {
+      const assigned = userRoles.filter((ur) => ur.user_id === u.id).map((ur) => `<span class="chip">${escapeHtml(ur.role_name)}</span>`).join('') || '<span class="muted small">No roles</span>';
+      return `<tr><td><strong>${escapeHtml(u.display_name)}</strong><br><span class="muted small">${escapeHtml(u.email)}</span></td><td>${assigned}</td></tr>`;
+    }).join('');
+    return `
+      <div class="two-col">
+        <article class="panel compact-panel">
+          <h3 class="section-title">Current Assignments</h3>
+          <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>User</th><th>Roles</th></tr></thead><tbody>${rows}</tbody></table></div>
+        </article>
+        <article class="panel compact-panel">
+          <h3 class="section-title">Assign or Remove Role</h3>
+          <div class="form-grid">
+            <select id="urUserId" class="span-2">${userOptions}</select>
+            <select id="urRoleId" class="span-2">${roleOptions}</select>
+            <button class="button" id="assignRoleButton">Assign role</button>
+            <button class="button secondary" id="removeRoleButton">Remove role</button>
+          </div>
+          <p class="muted small" style="margin-top:8px">Roles control what a user can see and do across the whole app. The Admin role bypasses all permission checks.</p>
+        </article>
       </div>`;
   }
 
@@ -961,7 +1023,7 @@
     return `
       <div class="two-col">
         <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>From</th><th>To</th><th>Record</th><th>Access</th></tr></thead><tbody>${(data.visibilityRules || []).map((r) => `<tr><td>${escapeHtml(r.source_team_name)}</td><td>${escapeHtml(r.target_team_name)}</td><td>${escapeHtml(friendlyLabel(r.content_type))}</td><td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td></tr>`).join('')}</tbody></table></div></article>
-        <article class="panel compact-panel"><h3 class="section-title">Add Rule</h3><div class="form-grid"><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><select id="visibilityContent"><option value="radar">Radar</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Limited</option><option value="summary">Summary</option><option value="full">Full</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Add Sharing Rule</h3><div class="form-grid"><label class="span-2" style="font-size:0.8rem;color:var(--muted)">From team (owner)</label><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><label class="span-2" style="font-size:0.8rem;color:var(--muted)">To team (can see)</label><select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
       </div>`;
   }
 
@@ -971,13 +1033,17 @@
 
   function bindSettingsForms() {
     const saveUserButton = document.getElementById('saveUserButton');
-    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => showMessage('User saved.'));
+    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('User saved.'); });
+    const assignRoleButton = document.getElementById('assignRoleButton');
+    if (assignRoleButton) assignRoleButton.onclick = () => callServer({ path: '/api/settings/user-roles', method: 'post', payload: { userId: document.getElementById('urUserId').value, roleId: document.getElementById('urRoleId').value, action: 'assign' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'user-roles' }); });
+    const removeRoleButton = document.getElementById('removeRoleButton');
+    if (removeRoleButton) removeRoleButton.onclick = () => callServer({ path: '/api/settings/user-roles', method: 'post', payload: { userId: document.getElementById('urUserId').value, roleId: document.getElementById('urRoleId').value, action: 'remove' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'user-roles' }); });
     const saveRoleButton = document.getElementById('saveRoleButton');
-    if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => showMessage('Role saved.'));
+    if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { bustCache('settings:reference'); showMessage('Role saved.'); });
     const saveTeamButton = document.getElementById('saveTeamButton');
-    if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => showMessage('Team saved.'));
+    if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
     const saveVisibilityButton = document.getElementById('saveVisibilityButton');
-    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => showMessage('Visibility rule saved.'));
+    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { bustCache('settings:reference'); showMessage('Sharing rule saved.'); });
   }
 
   function loadAuditLog() {

@@ -594,8 +594,48 @@ function createApi(env, actorEmail) {
     await assertPermission(auth, 'dashboard.view');
     const permissionKeys = await getEffectivePermissionKeys(auth);
     const canReviewConcerns = auth.isAdmin || permissionKeys.includes('concerns.review');
+    const canViewMeetings = auth.isAdmin || permissionKeys.includes('meetings.view');
 
-    const [headline, teamLoad] = await Promise.all([
+    const upcomingFollowUpsQuery = canViewMeetings
+      ? query(
+          [
+            "SELECT 'follow_up' AS item_type, a.id, a.student_id, a.team_id, s.first_name, s.last_name,",
+            "  a.title, a.summary, 'follow_up' AS interaction_type, COALESCE(a.visibility_level, 'summary') AS visibility_level,",
+            '  COALESCE(a.due_at, a.created_at) AS calendar_at, COALESCE(a.due_at, a.created_at) AS occurred_at,',
+            '  a.status AS item_status, a.due_at, a.priority, t.name AS team_name,',
+            '  u.display_name AS assigned_user_name',
+            'FROM actions a',
+            'JOIN students s ON s.id = a.student_id AND s.deleted_at IS NULL',
+            'LEFT JOIN teams t ON t.id = a.team_id',
+            'LEFT JOIN users u ON u.id = a.owner_user_id',
+            "WHERE a.deleted_at IS NULL AND a.owner_user_id = $1 AND a.status IN ('open', 'in_progress')",
+            'ORDER BY COALESCE(a.due_at, a.created_at) ASC LIMIT 6',
+          ].join('\n'),
+          [auth.userId]
+        )
+      : Promise.resolve([]);
+
+    const safeguardingConcernsQuery = canReviewConcerns
+      ? query(
+          [
+            'SELECT c.id, c.student_id, s.first_name, s.last_name, s.student_code, s.year_group,',
+            '  c.title, c.status, c.severity, c.urgency, c.category, c.referral_type,',
+            '  c.created_at, c.updated_at, c.occurred_at,',
+            '  t.name AS team_name, u.display_name AS submitted_by_name',
+            'FROM concerns c',
+            'JOIN students s ON s.id = c.student_id AND s.deleted_at IS NULL',
+            'LEFT JOIN teams t ON t.id = c.team_id',
+            'LEFT JOIN users u ON u.id = c.submitted_by_user_id',
+            "WHERE c.deleted_at IS NULL AND c.category = 'safeguarding'",
+            "  AND c.status IN ('open', 'triage', 'escalated')",
+            "ORDER BY CASE c.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,",
+            '  c.updated_at DESC',
+            'LIMIT 30',
+          ].join('\n')
+        )
+      : Promise.resolve([]);
+
+    const [headline, teamLoad, upcomingFollowUps, openSafeguardingConcerns] = await Promise.all([
       queryOne(
         [
           'SELECT',
@@ -615,32 +655,11 @@ function createApi(env, actorEmail) {
           'ORDER BY t.name',
         ].join('\n')
       ),
+      upcomingFollowUpsQuery,
+      safeguardingConcernsQuery,
     ]);
 
-    // DSL safeguarding panel: open/triage/escalated safeguarding concerns
-    // Only fetched when the user has concerns.review — no data leaks to non-DSL staff.
-    let openSafeguardingConcerns = [];
-    if (canReviewConcerns) {
-      openSafeguardingConcerns = await query(
-        [
-          'SELECT c.id, c.student_id, s.first_name, s.last_name, s.student_code, s.year_group,',
-          '  c.title, c.status, c.severity, c.urgency, c.category, c.referral_type,',
-          '  c.created_at, c.updated_at, c.occurred_at,',
-          '  t.name AS team_name, u.display_name AS submitted_by_name',
-          'FROM concerns c',
-          'JOIN students s ON s.id = c.student_id AND s.deleted_at IS NULL',
-          'LEFT JOIN teams t ON t.id = c.team_id',
-          'LEFT JOIN users u ON u.id = c.submitted_by_user_id',
-          "WHERE c.deleted_at IS NULL AND c.category = 'safeguarding'",
-          "  AND c.status IN ('open', 'triage', 'escalated')",
-          "ORDER BY CASE c.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,",
-          '  c.updated_at DESC',
-          'LIMIT 30',
-        ].join('\n')
-      );
-    }
-
-    return { headline, teamLoad, openSafeguardingConcerns };
+    return { headline, teamLoad, upcomingFollowUps, openSafeguardingConcerns };
   }
 
   async function getStudentsPayload(auth, requestQuery) {
@@ -1073,15 +1092,28 @@ function createApi(env, actorEmail) {
 
   async function getSettingsReferencePayload(auth) {
     await assertPermission(auth, 'settings.view');
-    const [users, roles, permissions, teams, visibilityRules, savedFilters] = await Promise.all([
+    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles] = await Promise.all([
       query('SELECT id, email, display_name, primary_team_id, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
       query('SELECT id, role_key, name, description, is_system, is_editable FROM roles WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT id, permission_key, area_key, action_key, description FROM permissions ORDER BY permission_key'),
       query('SELECT id, team_key, name, description, accent_color, is_active FROM teams WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT tvr.id, tvr.source_team_id, source_team.name AS source_team_name, tvr.target_team_id, target_team.name AS target_team_name, tvr.content_type, tvr.visibility_level FROM team_visibility_rules tvr JOIN teams source_team ON source_team.id = tvr.source_team_id JOIN teams target_team ON target_team.id = tvr.target_team_id WHERE tvr.deleted_at IS NULL ORDER BY source_team.name, target_team.name, tvr.content_type'),
       query('SELECT id, area_key, name, filter_expression, is_shared FROM saved_filters WHERE deleted_at IS NULL ORDER BY area_key, name'),
+      query('SELECT ur.user_id, ur.role_id, u.display_name AS user_name, u.email AS user_email, r.role_key, r.name AS role_name FROM user_roles ur JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL ORDER BY u.display_name, r.name'),
     ]);
-    return { users, roles, permissions, teams, visibilityRules, savedFilters };
+    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles };
+  }
+
+  async function assignUserRole(auth, body) {
+    await assertPermission(auth, 'settings.users.manage');
+    if (!body.userId || !body.roleId) throw new AppError('userId and roleId are required');
+    if (body.action === 'remove') {
+      await query('DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2', [body.userId, body.roleId]);
+    } else {
+      await query('INSERT INTO user_roles (user_id, role_id, created_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [body.userId, body.roleId, auth.userId]);
+    }
+    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: body.action === 'remove' ? 'role.remove' : 'role.assign', entityType: 'user_role', entityId: body.userId, metadata: { roleId: body.roleId } });
+    return { ok: true };
   }
 
   async function saveUser(auth, body) {
@@ -1158,6 +1190,7 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/settings/roles') return saveRole(auth, payload);
     if (method === 'post' && path === '/api/settings/teams') return saveTeam(auth, payload);
     if (method === 'post' && path === '/api/settings/visibility-rules') return saveVisibilityRule(auth, payload);
+    if (method === 'post' && path === '/api/settings/user-roles') return assignUserRole(auth, payload);
     if (method === 'post' && path === '/api/saved-filters') return saveFilter(auth, payload);
     if (method === 'get' && path === '/api/audit-logs') return getAuditLogsPayload(auth);
     throw new AppError('Route not found: ' + path, 404);
