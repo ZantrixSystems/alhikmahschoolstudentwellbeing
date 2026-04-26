@@ -20,6 +20,7 @@ function makeEnv(options = {}) {
   const calendarRows = options.calendarRows || [];
   const chronologyRows = options.chronologyRows || [];
   const teamRows = options.teamRows || [];
+  const userTeamRows = options.userTeamRows || [];
 
   const env = {
     WORKER_SHARED_SECRET: 'test-secret',
@@ -66,6 +67,7 @@ function makeEnv(options = {}) {
       if (sql.includes('FROM team_visibility_rules') && sql.includes('source_team_id')) {
         return visibilityRules;
       }
+      if (sql.includes('FROM user_teams ut')) return userTeamRows;
       if (sql.includes('INSERT INTO audit_logs')) return [];
       return [];
     },
@@ -336,6 +338,15 @@ test('DSL dashboard panel runs safeguarding query for concerns.review holders', 
   const api = createApi(envWithReview, 'worker.test@alhikmah.example.org');
   await api.dispatch({ path: '/api/dashboard', method: 'get' });
   assert.equal(safeguardingQueried, true);
+});
+
+test('settings reference includes user team assignments', async () => {
+  const api = createApi(makeEnv({
+    permissions: ['settings.view'],
+    userTeamRows: [{ user_id: USER_ID, team_id: SOURCE_TEAM, team_name: 'Pastoral' }],
+  }), 'worker.test@alhikmah.example.org');
+  const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
+  assert.deepEqual(data.userTeams, [{ user_id: USER_ID, team_id: SOURCE_TEAM, team_name: 'Pastoral' }]);
 });
 
 test('referral fields are redacted at summary visibility', () => {

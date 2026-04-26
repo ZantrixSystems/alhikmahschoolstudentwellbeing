@@ -1179,7 +1179,7 @@ function createApi(env, actorEmail) {
 
   async function getSettingsReferencePayload(auth) {
     await assertPermission(auth, 'settings.view');
-    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles] = await Promise.all([
+    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams] = await Promise.all([
       query('SELECT id, email, display_name, primary_team_id, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
       query('SELECT id, role_key, name, description, is_system, is_editable FROM roles WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT id, permission_key, area_key, action_key, description FROM permissions ORDER BY permission_key'),
