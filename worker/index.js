@@ -626,7 +626,7 @@ function createApi(env, actorEmail) {
             'JOIN students s ON s.id = c.student_id AND s.deleted_at IS NULL',
             'LEFT JOIN teams t ON t.id = c.team_id',
             'LEFT JOIN users u ON u.id = c.submitted_by_user_id',
-            "WHERE c.deleted_at IS NULL AND c.category = 'safeguarding'",
+            "WHERE c.deleted_at IS NULL AND t.team_key = 'safeguarding'",
             "  AND c.status IN ('open', 'triage', 'escalated')",
             "ORDER BY CASE c.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,",
             '  c.updated_at DESC',
@@ -852,7 +852,7 @@ function createApi(env, actorEmail) {
 
   async function createConcern(auth, body) {
     await assertPermission(auth, 'concerns.create');
-    if (!body.studentId || !body.category || !body.title || !body.summary) throw new AppError('studentId, category, title, and summary are required');
+    if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
     const referralType = body.referralType || null;
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
       throw new AppError('Invalid referral_type: ' + referralType);
@@ -865,8 +865,15 @@ function createApi(env, actorEmail) {
     if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) {
       throw new AppError('Invalid sanction_type: ' + sanctionType);
     }
-    // Safeguarding concerns must be marked confidential
-    const confidentialityLevel = body.category === 'safeguarding' ? 'safeguarding' : (body.confidentialityLevel || 'summary');
+    // Derive confidentiality from the team's key: safeguarding team = safeguarding confidentiality.
+    let isSafeguarding = false;
+    if (body.teamId) {
+      const teamRow = await queryOne('SELECT team_key FROM teams WHERE id = $1', [body.teamId]);
+      isSafeguarding = teamRow && teamRow.team_key === 'safeguarding';
+    }
+    const requestedConfidentiality = body.confidentialityLevel || 'summary';
+    const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
+    const derivedCategory = isSafeguarding ? 'safeguarding' : 'general';
     const concern = await queryOne(
       [
         'INSERT INTO concerns',
@@ -878,15 +885,14 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       [
         body.studentId, 'CON-' + Date.now(), body.teamId || null, auth.userId,
-        body.category, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
+        derivedCategory, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
         body.title, body.summary, body.detail || null,
         referralType, body.referralDate || null, body.referralOutcome || null,
         incidentType, sanctionType, body.sanctionDuration || null, body.behaviourPlanActive === true,
       ]
     );
-    const visibilityLevel = body.category === 'safeguarding' ? 'summary' : 'summary';
-    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, visibilityLevel, null, null, null, null, null);
-    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { category: body.category, severity: body.severity } });
+    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, 'summary', null, null, null, null, null);
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { severity: body.severity, teamId: body.teamId } });
     return { concern };
   }
 
@@ -946,22 +952,34 @@ function createApi(env, actorEmail) {
     if (incidentType && !VALID_INCIDENT_TYPES.includes(incidentType)) throw new AppError('Invalid incident_type: ' + incidentType);
     const sanctionType = body.sanctionType !== undefined ? body.sanctionType : existing.sanction_type;
     if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) throw new AppError('Invalid sanction_type: ' + sanctionType);
+    const teamId = body.teamId !== undefined ? (body.teamId || null) : existing.team_id;
+    let isSafeguarding = false;
+    if (teamId) {
+      const teamRow = await queryOne('SELECT team_key FROM teams WHERE id = $1', [teamId]);
+      isSafeguarding = teamRow && teamRow.team_key === 'safeguarding';
+    }
+    const requestedConfidentiality = body.confidentialityLevel !== undefined ? (body.confidentialityLevel || 'summary') : (existing.confidentiality_level || 'summary');
+    const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
+    const derivedCategory = isSafeguarding ? 'safeguarding' : 'general';
 
     const concern = await queryOne(
       [
         'UPDATE concerns SET',
-        '  title = $1, summary = $2, severity = $3, category = $4,',
-        '  referral_type = $5, referral_date = $6, referral_outcome = $7,',
-        '  incident_type = $8, sanction_type = $9, sanction_duration = $10,',
-        '  behaviour_plan_active = $11,',
-        '  updated_at = NOW(), updated_by = $12',
-        'WHERE id = $13 AND deleted_at IS NULL RETURNING *',
+        '  title = $1, summary = $2, severity = $3, team_id = $4,',
+        '  category = $5, confidentiality_level = $6,',
+        '  referral_type = $7, referral_date = $8, referral_outcome = $9,',
+        '  incident_type = $10, sanction_type = $11, sanction_duration = $12,',
+        '  behaviour_plan_active = $13,',
+        '  updated_at = NOW(), updated_by = $14',
+        'WHERE id = $15 AND deleted_at IS NULL RETURNING *',
       ].join('\n'),
       [
         body.title || existing.title,
         body.summary || existing.summary,
         body.severity || existing.severity,
-        body.category || existing.category,
+        teamId,
+        derivedCategory,
+        confidentialityLevel,
         referralType,
         body.referralDate !== undefined ? (body.referralDate || null) : existing.referral_date,
         body.referralOutcome !== undefined ? (body.referralOutcome || null) : existing.referral_outcome,
@@ -973,7 +991,7 @@ function createApi(env, actorEmail) {
         concernId,
       ]
     );
-    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'update', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { severity: body.severity } });
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'update', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { severity: body.severity, teamId } });
     return { concern };
   }
 

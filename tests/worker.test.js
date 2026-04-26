@@ -6,6 +6,7 @@ const USER_ID = '11111111-1111-1111-1111-111111111111';
 const SOURCE_TEAM = '22222222-2222-2222-2222-222222222222';
 const TARGET_TEAM = '33333333-3333-3333-3333-333333333333';
 const STUDENT_ID = '44444444-4444-4444-4444-444444444444';
+const SAFEGUARDING_TEAM = '55555555-5555-5555-5555-555555555555';
 
 function makeEnv(options = {}) {
   const calls = [];
@@ -18,6 +19,7 @@ function makeEnv(options = {}) {
   const meetingRows = options.meetingRows || [];
   const calendarRows = options.calendarRows || [];
   const chronologyRows = options.chronologyRows || [];
+  const teamRows = options.teamRows || [];
 
   const env = {
     WORKER_SHARED_SECRET: 'test-secret',
@@ -46,6 +48,9 @@ function makeEnv(options = {}) {
       }
       if (sql.includes('p.permission_key = $2')) {
         return permissions.includes(params[1]) || roleKeys.includes('admin') ? [{ '?column?': 1 }] : [];
+      }
+      if (sql.includes('SELECT team_key FROM teams WHERE id = $1')) {
+        return teamRows.filter((team) => team.id === params[0]);
       }
       if (sql.includes('FROM students s') && sql.includes('GROUP BY s.id') && sql.includes('AS flags')) {
         return profileRows;
@@ -283,21 +288,24 @@ test('creating a concern with invalid referral_type is rejected', async () => {
 });
 
 test('safeguarding concern is automatically marked safeguarding confidentiality', async () => {
-  const env = makeEnv({ permissions: ['concerns.create'] });
+  const env = makeEnv({
+    permissions: ['concerns.create'],
+    teamRows: [{ id: SAFEGUARDING_TEAM, team_key: 'safeguarding' }],
+  });
   let insertedConfidentiality = null;
   const originalQuery = env.__query.bind(env);
   env.__query = async (sql, params) => {
     if (sql.includes('INSERT INTO concerns')) {
       // confidentiality_level is the 8th param ($8)
       insertedConfidentiality = params[7];
-      return [{ id: 'c-1', student_id: STUDENT_ID, category: 'safeguarding', team_id: null }];
+      return [{ id: 'c-1', student_id: STUDENT_ID, category: 'safeguarding', team_id: SAFEGUARDING_TEAM }];
     }
     return originalQuery(sql, params);
   };
   const api = createApi(env, 'worker.test@alhikmah.example.org');
   await api.dispatch({
     path: '/api/concerns', method: 'post',
-    payload: { studentId: STUDENT_ID, category: 'safeguarding', title: 'T', summary: 'S' },
+    payload: { studentId: STUDENT_ID, teamId: SAFEGUARDING_TEAM, title: 'T', summary: 'S' },
   });
   assert.equal(insertedConfidentiality, 'safeguarding');
 });
@@ -308,7 +316,7 @@ test('DSL dashboard panel is only populated for concerns.review holders', async 
   let safeguardingQueried = false;
   const origQuery = envNoReview.__query.bind(envNoReview);
   envNoReview.__query = async (sql, params) => {
-    if (sql.includes("category = 'safeguarding'")) safeguardingQueried = true;
+    if (sql.includes("t.team_key = 'safeguarding'")) safeguardingQueried = true;
     return origQuery(sql, params);
   };
   const api = createApi(envNoReview, 'worker.test@alhikmah.example.org');
@@ -322,7 +330,7 @@ test('DSL dashboard panel runs safeguarding query for concerns.review holders', 
   let safeguardingQueried = false;
   const origQuery = envWithReview.__query.bind(envWithReview);
   envWithReview.__query = async (sql, params) => {
-    if (sql.includes("category = 'safeguarding'")) { safeguardingQueried = true; return []; }
+    if (sql.includes("t.team_key = 'safeguarding'")) { safeguardingQueried = true; return []; }
     return origQuery(sql, params);
   };
   const api = createApi(envWithReview, 'worker.test@alhikmah.example.org');

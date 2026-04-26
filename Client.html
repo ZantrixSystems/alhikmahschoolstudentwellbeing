@@ -502,14 +502,15 @@
           </div>
           <button class="button span-2" id="submitMeeting">Log meeting</button>
         </div>`,
-      concern: `
+      concern: (() => {
+        const safeguardingTeamId = (state.bootstrap.teams || []).find((t) => t.team_key === 'safeguarding')?.id || '';
+        return `
         <div class="form-grid">
-          <input id="concernTitle" placeholder="Concern title">
-          <select id="concernCategory"><option value="attendance">Attendance</option><option value="behaviour">Behaviour</option><option value="safeguarding">Safeguarding</option><option value="wellbeing">Wellbeing</option></select>
-          <select id="concernSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+          <input id="concernTitle" class="span-2" placeholder="Concern title">
           <select id="concernTeam"><option value="">No team</option>${teams}</select>
+          <select id="concernSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
           <textarea id="concernSummary" class="span-2" rows="3" placeholder="Short operational summary"></textarea>
-          <div class="span-2" id="concernSafeguardingFields" style="display:none">
+          <div class="span-2" id="concernSafeguardingFields" style="display:none" data-safeguarding-team-id="${escapeHtml(safeguardingTeamId)}">
             <div class="form-grid">
               <select id="concernReferralType">
                 <option value="none">No referral made</option>
@@ -525,10 +526,10 @@
               <textarea id="concernReferralOutcome" class="span-2" rows="2" placeholder="Referral outcome / agency response (optional at this stage)"></textarea>
             </div>
           </div>
-          <div class="span-2" id="concernBehaviourFields" style="display:none">
+          <div class="span-2">
             <div class="form-grid">
               <select id="concernIncidentType">
-                <option value="">Incident type</option>
+                <option value="">Incident type (optional)</option>
                 <option value="verbal">Verbal abuse / aggression</option>
                 <option value="physical">Physical aggression</option>
                 <option value="disruption">Persistent disruption</option>
@@ -552,7 +553,8 @@
             </div>
           </div>
           <button class="button span-2" id="submitConcern">Log concern</button>
-        </div>`,
+        </div>`;
+      })(),
       followup: (() => {
         const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
         const concernLinkSelect = openConcerns.length ? `
@@ -648,22 +650,20 @@
         externalRef: document.getElementById('meetingExternalRef') ? document.getElementById('meetingExternalRef').value : '',
       });
     };
-    const concernCategory = document.getElementById('concernCategory');
+    const concernTeam = document.getElementById('concernTeam');
     const concernSafeguardingFields = document.getElementById('concernSafeguardingFields');
-    const concernBehaviourFields = document.getElementById('concernBehaviourFields');
-    if (concernCategory) {
+    if (concernTeam) {
       const toggleConcernFields = () => {
-        if (concernSafeguardingFields) concernSafeguardingFields.style.display = concernCategory.value === 'safeguarding' ? '' : 'none';
-        if (concernBehaviourFields) concernBehaviourFields.style.display = concernCategory.value === 'behaviour' ? '' : 'none';
+        const safeguardingTeamId = concernSafeguardingFields ? concernSafeguardingFields.dataset.safeguardingTeamId : '';
+        if (concernSafeguardingFields) concernSafeguardingFields.style.display = concernTeam.value === safeguardingTeamId ? '' : 'none';
       };
-      concernCategory.onchange = toggleConcernFields;
+      concernTeam.onchange = toggleConcernFields;
       toggleConcernFields();
     }
     const submitConcern = document.getElementById('submitConcern');
     if (submitConcern) submitConcern.onclick = () => postProfile('/api/concerns', {
       studentId: state.route.studentId,
       title: document.getElementById('concernTitle').value,
-      category: document.getElementById('concernCategory').value,
       severity: document.getElementById('concernSeverity').value,
       summary: document.getElementById('concernSummary').value,
       teamId: document.getElementById('concernTeam').value,
@@ -919,7 +919,7 @@
                   <option value="escalated"${c.status === 'escalated' ? ' selected' : ''}>Escalated</option>
                 </select>
                 <textarea class="span-2 concern-edit-summary" rows="3" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.summary || '')}</textarea>
-                ${c.category === 'safeguarding' ? `
+                ${c.team_key === 'safeguarding' ? `
                 <select class="concern-edit-referral-type" data-concern-id="${escapeHtml(c.id)}">
                   <option value="none"${(c.referral_type || 'none') === 'none' ? ' selected' : ''}>No referral made</option>
                   <option value="mash"${c.referral_type === 'mash' ? ' selected' : ''}>MASH referral</option>
@@ -931,9 +931,8 @@
                   <option value="other"${c.referral_type === 'other' ? ' selected' : ''}>Other</option>
                 </select>
                 <textarea class="span-2 concern-edit-referral-outcome" rows="2" placeholder="Referral outcome (optional)" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.referral_outcome || '')}</textarea>` : ''}
-                ${c.category === 'behaviour' ? `
                 <select class="concern-edit-incident-type" data-concern-id="${escapeHtml(c.id)}">
-                  <option value="">Incident type</option>
+                  <option value="">Incident type (optional)</option>
                   <option value="verbal"${c.incident_type === 'verbal' ? ' selected' : ''}>Verbal abuse / aggression</option>
                   <option value="physical"${c.incident_type === 'physical' ? ' selected' : ''}>Physical aggression</option>
                   <option value="disruption"${c.incident_type === 'disruption' ? ' selected' : ''}>Persistent disruption</option>
@@ -951,8 +950,8 @@
                   <option value="ftes"${c.sanction_type === 'ftes' ? ' selected' : ''}>Fixed-term exclusion</option>
                   <option value="managed_move"${c.sanction_type === 'managed_move' ? ' selected' : ''}>Managed move</option>
                   <option value="permanent_exclusion"${c.sanction_type === 'permanent_exclusion' ? ' selected' : ''}>Permanent exclusion</option>
-                </select>` : ''}
-                <button class="button concern-edit-save" data-concern-id="${escapeHtml(c.id)}" data-category="${escapeHtml(c.category || '')}">Save</button>
+                </select>
+                <button class="button concern-edit-save" data-concern-id="${escapeHtml(c.id)}">Save</button>
                 <button class="button secondary concern-edit-cancel" data-concern-id="${escapeHtml(c.id)}">Cancel</button>
               </div>
             </div>` : '';
@@ -970,7 +969,7 @@
             <div class="concern-card" data-concern-card-id="${escapeHtml(c.id)}">
               <div class="concern-card-header" data-toggle-concern="${escapeHtml(c.id)}">
                 <strong>${escapeHtml(c.title)}</strong>
-                <span class="badge">${escapeHtml(friendlyLabel(c.category || 'general'))}</span>
+                ${c.team_name ? `<span class="badge">${escapeHtml(c.team_name)}</span>` : ''}
                 <span class="badge ${c.severity === 'high' ? 'danger' : c.severity === 'medium' ? 'warn' : ''}">${escapeHtml(c.severity)}</span>
                 ${concernStatusBadge(c.status)}
                 <span class="muted small">${escapeHtml(formatDate(c.created_at, true))}</span>
@@ -1015,7 +1014,6 @@
         host.querySelectorAll('.concern-edit-save').forEach((btn) => {
           btn.onclick = () => {
             const id = btn.dataset.concernId;
-            const category = btn.dataset.category;
             const titleEl = host.querySelector(`.concern-edit-title[data-concern-id="${id}"]`);
             const severityEl = host.querySelector(`.concern-edit-severity[data-concern-id="${id}"]`);
             const statusEl = host.querySelector(`.concern-edit-status[data-concern-id="${id}"]`);

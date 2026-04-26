@@ -13,7 +13,8 @@
 - confidential concerns can be marked for restricted visibility
 - ownership and status are tracked
 - chronology records submission, escalation, and resolution milestones
-- safeguarding concerns are automatically confidentiality-gated at creation
+- concerns owned by the Safeguarding team are automatically confidentiality-gated at creation and update
+- the concern category is retained only as a backend compatibility field and is derived from team ownership
 
 ## Concern Closure (migration 008)
 
@@ -25,12 +26,15 @@ preserving the full decision chain for inspection scrutiny.
 
 ## Referral Tracking (migration 008)
 
-Safeguarding concerns support structured referral fields:
+Concerns owned by the Safeguarding team support structured referral fields:
 - `referral_type`: none / mash / lado / police / early_help / camhs / social_care / other
 - `referral_date`: date the referral was made
 - `referral_outcome`: agency response (free text)
 
-Safeguarding concerns automatically receive `confidentiality_level = 'safeguarding'` at creation.
+Safeguarding team concerns automatically receive `confidentiality_level = 'safeguarding'`
+at creation and update. The staff UI does not expose a category dropdown; selecting the
+Safeguarding team reveals referral fields and the Worker derives backend category and
+confidentiality from `teams.team_key = 'safeguarding'`.
 
 Referral specifics (`referral_outcome`, `referral_date`, `outcome_summary`, `closed_by_name`,
 `external_ref`) are redacted at `summary` visibility and below. Only users with `full` visibility
