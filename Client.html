@@ -6,6 +6,7 @@
     profileData: null,
     profileSaving: false,
     profileTab: 'overview',
+    dropdownSettingsField: 'incident_type',
     pageCache: {},
   };
 
@@ -480,7 +481,7 @@
         <div class="form-grid">
           <input id="noteSummary" class="span-2" placeholder="Short note summary">
           <textarea id="noteBody" class="span-2" rows="3" placeholder="Support note"></textarea>
-          <select id="noteTeam"><option value="">No team</option>${teams}</select>
+          <select id="noteTeam"><option value="">All teams (everyone)</option>${teams}</select>
           ${concernLinkSelect}
           <button class="button" id="submitNote">Add note</button>
         </div>`;
@@ -488,9 +489,9 @@
       meeting: `
         <div class="form-grid">
           <input id="meetingTitle" placeholder="Meeting title">
-          <input id="meetingOccurredAt" type="datetime-local">
+          <input id="meetingOccurredAt" type="datetime-local" value="${new Date().toISOString().slice(0,16)}">
           <select id="meetingType"><option value="student_check_in">Student check-in</option><option value="parent_contact">Parent contact</option><option value="review_meeting">Review meeting</option><option value="external_agency">External agency</option><option value="team_around_family">Team around family</option></select>
-          <select id="meetingTeam"><option value="">No team</option>${teams}</select>
+          <select id="meetingTeam"><option value="">All teams (everyone)</option>${teams}</select>
           <textarea id="meetingSummary" class="span-2" rows="3" placeholder="Shareable summary"></textarea>
           <div class="span-2" id="meetingExternalFields" style="display:none">
             <div class="form-grid">
@@ -509,16 +510,16 @@
               <input id="meetingExternalRef" class="span-2" placeholder="Case / reference number (optional)">
             </div>
           </div>
-          <button class="button span-2" id="submitMeeting">Log meeting</button>
+          <button class="button span-2" id="submitMeeting">Save meeting</button>
         </div>`,
       concern: (() => {
         const safeguardingTeamId = (state.bootstrap.teams || []).find((t) => t.team_key === 'safeguarding')?.id || '';
         return `
         <div class="form-grid">
-          <input id="concernTitle" class="span-2" placeholder="Concern title">
-          <select id="concernTeam"><option value="">No team</option>${teams}</select>
+          <input id="concernTitle" class="span-2" placeholder="Case title">
+          <select id="concernTeam"><option value="">All teams (everyone)</option>${teams}</select>
           <select id="concernSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
-          <textarea id="concernSummary" class="span-2" rows="3" placeholder="Short operational summary"></textarea>
+          <textarea id="concernSummary" class="span-2" rows="3" placeholder="Brief summary of the concern"></textarea>
           <div class="span-2" id="concernSafeguardingFields" style="display:none" data-safeguarding-team-id="${escapeHtml(safeguardingTeamId)}">
             <div class="form-grid">
               <select id="concernReferralType">
@@ -547,7 +548,7 @@
               <label class="check-control"><input id="concernBehaviourPlanActive" type="checkbox"> Behaviour plan in place</label>
             </div>
           </div>
-          <button class="button span-2" id="submitConcern">Log concern</button>
+          <button class="button span-2" id="submitConcern">Open case</button>
         </div>`;
       })(),
       followup: (() => {
@@ -560,11 +561,11 @@
         return `
         <div class="form-grid">
           <input id="followTitle" placeholder="Follow-up title">
-          <input id="followDueAt" type="date">
+          <input id="followDueAt" type="date" value="${new Date().toISOString().slice(0,10)}">
           <select id="followStatus"><option value="open">Open</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
           <select id="followPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
-          <select id="followTeam"><option value="">No team</option>${teams}</select>
-          <select id="followVisibility"><option value="summary">Summary</option><option value="indicator">Indicator</option><option value="full">Full</option></select>
+          <select id="followTeam"><option value="">All teams (everyone)</option>${teams}</select>
+          <select id="followVisibility"><option value="summary">Summary</option><option value="indicator">Indicator only</option><option value="full">Full detail</option></select>
           ${concernLinkSelect}
           <textarea id="followSummary" class="span-2" rows="3" placeholder="What needs to happen?"></textarea>
           <button class="button span-2" id="submitFollow">Add follow-up</button>
@@ -585,14 +586,14 @@
         </div>`,
       closeconcern: (() => {
         const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
-        if (!openConcerns.length) return '<p class="muted small">No open concerns to close.</p>';
+        if (!openConcerns.length) return '<p class="muted small">No open cases to close.</p>';
         const options = openConcerns.map((c) => `<option value="${escapeHtml(c.id)}">[${escapeHtml(c.severity)}] ${escapeHtml(c.title)} — ${escapeHtml(friendlyLabel(c.status))}</option>`).join('');
         return `
           <div class="form-grid">
             <select id="closeConcernId" class="span-2">${options}</select>
             <textarea id="closeConcernOutcome" class="span-2" rows="3" placeholder="Outcome summary — required. What was decided? What action was taken?"></textarea>
             <textarea id="closeConcernNote" class="span-2" rows="2" placeholder="Closure note (optional)"></textarea>
-            <button class="button span-2" id="submitCloseConcern">Close concern</button>
+            <button class="button span-2" id="submitCloseConcern">Close case</button>
           </div>`;
       })(),
       sendplan: `
@@ -1089,9 +1090,9 @@
 
       const actionButtons = [
         ['note', 'Add note', 'notes.create'],
-        ['meeting', 'Add meeting', 'meetings.create'],
-        ['concern', 'Add concern', 'concerns.create'],
-        ['closeconcern', 'Close concern', 'concerns.close'],
+        ['meeting', 'Log meeting', 'meetings.create'],
+        ['concern', 'Open case', 'concerns.create'],
+        ['closeconcern', 'Close case', 'concerns.close'],
         ['sendplan', 'SEND plan', 'send.manage'],
         ['followup', 'Add follow-up', 'actions.manage'],
         ['status', 'Update status', 'students.manage'],
@@ -1113,7 +1114,7 @@
         <div class="profile-tabs-bar">
           <button data-profile-tab="overview" class="tab-btn${state.profileTab === 'overview' ? ' active' : ''}">Overview</button>
           <button data-profile-tab="concerns" class="tab-btn${state.profileTab === 'concerns' ? ' active' : ''}">
-            Concerns${openConcernCount > 0 ? ' <span class="tab-dot danger"></span>' : ''}
+            Cases${openConcernCount > 0 ? ' <span class="tab-dot danger"></span>' : ''}
           </button>
           <button data-profile-tab="meetings" class="tab-btn${state.profileTab === 'meetings' ? ' active' : ''}">
             Meetings${hasRecentMeetings ? ' <span class="tab-dot"></span>' : ''}
@@ -1448,35 +1449,38 @@
   }
 
   function renderDropdownSettings(data) {
-    const fieldLabels = { incident_type: 'Incident Type', action_taken: 'Action Taken' };
-    const rows = (data.referenceOptions || []).filter((option) => option.area_key === 'concerns').map((option) => `
+    const fields = [
+      { key: 'incident_type', label: 'Incident Type', area: 'concerns', description: 'Options shown when logging the type of incident on a case.' },
+      { key: 'action_taken', label: 'Action Taken', area: 'concerns', description: 'Options shown when recording what action was taken on a case.' },
+    ];
+    const selectedField = state.dropdownSettingsField || fields[0].key;
+    const field = fields.find((f) => f.key === selectedField) || fields[0];
+    const options = (data.referenceOptions || []).filter((o) => o.area_key === field.area && o.field_key === field.key);
+    const rows = options.map((o) => `
       <tr>
-        <td>${escapeHtml(fieldLabels[option.field_key] || friendlyLabel(option.field_key))}</td>
-        <td>${escapeHtml(option.label)}</td>
-        <td><code>${escapeHtml(option.option_key)}</code></td>
-        <td>${escapeHtml(option.sort_order || 0)}</td>
-        <td><span class="badge ${option.is_active ? '' : 'secondary'}">${option.is_active ? 'Active' : 'Inactive'}</span></td>
-        <td>${option.is_system ? '<span class="muted small">System</span>' : `<button class="text-button" data-delete-reference-option data-id="${escapeHtml(option.id)}" data-label="${escapeHtml(option.label)}">Delete</button>`}</td>
+        <td>${escapeHtml(o.label)}</td>
+        <td>${escapeHtml(String(o.sort_order || 0))}</td>
+        <td><span class="badge ${o.is_active ? '' : 'secondary'}">${o.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td>${o.is_system ? '<span class="muted small">System</span>' : `<button class="text-button" data-delete-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}">Delete</button>`}</td>
       </tr>`).join('');
+    const tabs = fields.map((f) => `<button class="tab-btn${f.key === selectedField ? ' active' : ''}" data-dropdown-field="${escapeHtml(f.key)}">${escapeHtml(f.label)}</button>`).join('');
     return `
-      <div class="two-col">
-        <article class="panel compact-panel">
-          <h3 class="section-title">Concern Dropdowns</h3>
-          <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Dropdown</th><th>Label</th><th>Key</th><th>Order</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-        </article>
-        <article class="panel compact-panel">
-          <h3 class="section-title">Add Option</h3>
-          <div class="form-grid">
-            <select id="referenceField"><option value="incident_type">Incident type</option><option value="action_taken">Action taken</option></select>
-            <select id="referenceActive"><option value="true">Active</option><option value="false">Inactive</option></select>
-            <input id="referenceLabel" class="span-2" placeholder="Label">
-            <input id="referenceKey" placeholder="Optional key">
-            <input id="referenceSortOrder" type="number" value="100" placeholder="Sort">
-            <textarea id="referenceDescription" class="span-2" rows="2" placeholder="Description (optional)"></textarea>
-            <button class="button span-2" id="saveReferenceOptionButton">Save option</button>
+      <article class="panel compact-panel">
+        <div class="profile-tabs-bar" style="margin-bottom:12px">${tabs}</div>
+        <p class="muted small" style="margin-bottom:12px">${escapeHtml(field.description)}</p>
+        <div class="two-col">
+          <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Label</th><th>Order</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">No options yet.</td></tr>'}</tbody></table></div>
+          <div>
+            <p class="eyebrow" style="margin-bottom:8px">Add option</p>
+            <div class="form-grid">
+              <input id="referenceLabel" class="span-2" placeholder="Label (e.g. Verbal warning)">
+              <input id="referenceSortOrder" type="number" value="100" placeholder="Sort order">
+              <select id="referenceActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+              <button class="button span-2" id="saveReferenceOptionButton">Add</button>
+            </div>
           </div>
-        </article>
-      </div>`;
+        </div>
+      </article>`;
   }
 
   function bindSettingsForms() {
@@ -1564,8 +1568,20 @@
           .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule deleted.'); });
       };
     });
+    Array.from(document.querySelectorAll('[data-dropdown-field]')).forEach((btn) => {
+      btn.onclick = () => {
+        state.dropdownSettingsField = btn.dataset.dropdownField;
+        updateRoute({ page: 'settings', settingsTab: 'dropdowns' });
+      };
+    });
     const saveReferenceOptionButton = document.getElementById('saveReferenceOptionButton');
-    if (saveReferenceOptionButton) saveReferenceOptionButton.onclick = () => callServer({ path: '/api/settings/reference-options', method: 'post', payload: { areaKey: 'concerns', fieldKey: document.getElementById('referenceField').value, optionKey: document.getElementById('referenceKey').value || document.getElementById('referenceLabel').value, label: document.getElementById('referenceLabel').value, description: document.getElementById('referenceDescription').value, sortOrder: document.getElementById('referenceSortOrder').value, isActive: document.getElementById('referenceActive').value === 'true' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Dropdown option saved.'); });
+    if (saveReferenceOptionButton) saveReferenceOptionButton.onclick = () => {
+      const fieldKey = state.dropdownSettingsField || 'incident_type';
+      const label = document.getElementById('referenceLabel').value;
+      if (!label) return showMessage('Label is required.', 'error');
+      callServer({ path: '/api/settings/reference-options', method: 'post', payload: { areaKey: 'concerns', fieldKey, optionKey: label.toLowerCase().replace(/[^a-z0-9]+/g, '_'), label, sortOrder: document.getElementById('referenceSortOrder').value, isActive: document.getElementById('referenceActive').value === 'true' } })
+        .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Option added.'); });
+    };
     Array.from(document.querySelectorAll('[data-delete-reference-option]')).forEach((btn) => {
       btn.onclick = () => {
         if (!confirm('Delete dropdown option: ' + btn.dataset.label + '?')) return;
