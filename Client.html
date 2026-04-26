@@ -11,7 +11,7 @@
     pageCache: {},
   };
 
-  const PAGE_CACHE_TTL = 60000;
+  const PAGE_CACHE_TTL = 300000; // 5 minutes
   let renderGeneration = 0;
 
   function getCached(key) {
@@ -294,7 +294,14 @@
       paintDashboard(cached);
       callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard).catch(() => {});
     } else {
-      callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard);
+      callServer({ path: '/api/dashboard', method: 'get' }).then((data) => {
+        paintDashboard(data);
+        // Pre-warm student list so navigating to Students is instant
+        if (!getCached('students::')) {
+          callServer({ path: '/api/students', method: 'get', query: { q: '', filter: '' } })
+            .then((sd) => setCached('students::', sd)).catch(() => {});
+        }
+      });
     }
   }
 
@@ -1306,7 +1313,7 @@
         const btn = document.createElement('button');
         btn.dataset.settingsTab = key;
         btn.textContent = label;
-        btn.onclick = () => updateRoute({ page: 'settings', settingsTab: key });
+        btn.onclick = () => { state.route.settingsTab = key; renderSettingsPage(); };
         tabsEl.appendChild(btn);
       });
       target.dataset.built = '1';
@@ -1464,45 +1471,66 @@
   }
 
   function renderVisibilitySettings(data) {
+    const CONTENT_TYPES_META = [
+      { key: 'concerns', label: 'Cases' },
+      { key: 'meetings', label: 'Meetings' },
+      { key: 'actions', label: 'Follow-ups' },
+      { key: 'chronology', label: 'Chronology' },
+      { key: 'radar', label: 'Radar' },
+    ];
+    const VISIBILITY_LEVELS = ['none', 'summary', 'full'];
     const teams = (data.teams || []).filter((t) => t.is_active !== false);
-    // Build a lookup: "sourceId|targetId" -> array of rule ids
+    // Build a lookup: "sourceId|targetId|contentType" -> { id, visibilityLevel }
     const ruleMap = {};
     (data.visibilityRules || []).forEach((r) => {
-      const key = r.source_team_id + '|' + r.target_team_id;
-      if (!ruleMap[key]) ruleMap[key] = [];
-      ruleMap[key].push(r.id);
+      ruleMap[r.source_team_id + '|' + r.target_team_id + '|' + r.content_type] = { id: r.id, level: r.visibility_level };
     });
-    const headerCells = teams.map((t) => `<th style="text-align:center;min-width:80px">${escapeHtml(t.name)}</th>`).join('');
-    const bodyRows = teams.map((src) => {
-      const cells = teams.map((tgt) => {
-        if (src.id === tgt.id) return `<td style="text-align:center;color:var(--sage)">●</td>`;
-        const ruleIds = ruleMap[src.id + '|' + tgt.id] || [];
-        const checked = ruleIds.length > 0;
-        return `<td style="text-align:center">
-          <button class="visibility-toggle ${checked ? 'active' : ''}"
-            data-source-id="${escapeHtml(src.id)}"
-            data-target-id="${escapeHtml(tgt.id)}"
-            data-rule-ids="${escapeHtml(ruleIds.join(','))}"
-            title="${escapeHtml(src.name)} data visible to ${escapeHtml(tgt.name)}"
-            style="width:28px;height:28px;border-radius:50%;border:2px solid ${checked ? 'var(--sage)' : 'var(--border)'};background:${checked ? 'var(--sage)' : 'transparent'};cursor:pointer;font-size:14px">
-            ${checked ? '✓' : ''}
-          </button>
-        </td>`;
-      }).join('');
-      return `<tr><td><strong>${escapeHtml(src.name)}</strong><br><span class="muted small">their data →</span></td>${cells}</tr>`;
-    }).join('');
+
+    const rows = [];
+    teams.forEach((src) => {
+      // Header row for this source team
+      rows.push(`<tr style="background:var(--surface-alt,var(--surface))">
+        <td colspan="${teams.length + 1}" style="padding:10px 12px 4px">
+          <strong>${escapeHtml(src.name)}</strong>
+          <span class="muted small" style="margin-left:8px">their data is visible to →</span>
+        </td>
+      </tr>`);
+      // One row per content type
+      CONTENT_TYPES_META.forEach((ct) => {
+        const cells = teams.map((tgt) => {
+          if (src.id === tgt.id) return `<td style="text-align:center;color:var(--sage);font-size:11px">always</td>`;
+          const rule = ruleMap[src.id + '|' + tgt.id + '|' + ct.key];
+          const current = rule ? rule.level : 'none';
+          const ruleId = rule ? rule.id : '';
+          const levelBtns = VISIBILITY_LEVELS.map((lv) => {
+            const active = current === lv;
+            const color = lv === 'full' ? 'var(--sage)' : lv === 'summary' ? '#9b8ecf' : 'var(--border)';
+            return `<button class="vis-level-btn" data-source-id="${escapeHtml(src.id)}" data-target-id="${escapeHtml(tgt.id)}" data-content-type="${escapeHtml(ct.key)}" data-level="${escapeHtml(lv)}" data-rule-id="${escapeHtml(ruleId)}" data-current="${escapeHtml(current)}"
+              style="padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid ${active ? color : 'var(--border)'};background:${active ? color : 'transparent'};color:${active && lv !== 'none' ? '#fff' : active ? 'var(--text-muted)' : 'var(--text-muted)'};cursor:pointer;margin:1px"
+              title="${escapeHtml(lv)}">${lv === 'none' ? '–' : lv === 'summary' ? 'Title' : 'Full'}</button>`;
+          }).join('');
+          return `<td style="text-align:center;padding:3px 6px">${levelBtns}</td>`;
+        }).join('');
+        rows.push(`<tr>
+          <td style="padding:3px 12px 3px 24px;font-size:12px;color:var(--text-muted)">${escapeHtml(ct.label)}</td>
+          ${cells}
+        </tr>`);
+      });
+    });
+
+    const headerCells = teams.map((t) => `<th style="text-align:center;min-width:110px;font-size:12px">${escapeHtml(t.name)}</th>`).join('');
     return `
       <article class="panel compact-panel">
         <div class="panel-header">
           <div>
             <h3 class="section-title">Team Sharing</h3>
-            <p class="muted small">Rows = whose data. Columns = who can see it. ● = own data (always visible). Click to grant or revoke access.</p>
+            <p class="muted small">For each content type: <strong>–</strong> = hidden, <strong>Title</strong> = see title/summary only, <strong>Full</strong> = see everything.</p>
           </div>
         </div>
         <div class="table-scroll">
           <table class="data-table dense-table">
             <thead><tr><th></th>${headerCells}</tr></thead>
-            <tbody>${bodyRows}</tbody>
+            <tbody>${rows.join('')}</tbody>
           </table>
         </div>
       </article>`;
@@ -1525,7 +1553,10 @@
         <td>${escapeHtml(o.label)}</td>
         <td>${escapeHtml(String(o.sort_order || 0))}</td>
         <td><span class="badge ${o.is_active ? '' : 'secondary'}">${o.is_active ? 'Active' : 'Inactive'}</span></td>
-        <td><button class="text-button" data-delete-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}">Delete</button></td>
+        <td style="white-space:nowrap">
+          <button class="text-button" data-edit-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}" data-sort="${escapeHtml(String(o.sort_order || 0))}" data-active="${escapeHtml(String(o.is_active))}" style="margin-right:8px">Edit</button>
+          <button class="text-button" data-delete-reference-option data-id="${escapeHtml(o.id)}" data-label="${escapeHtml(o.label)}">Delete</button>
+        </td>
       </tr>`).join('');
     const tabs = fields.map((f) => `<button class="tab-btn${f.key === selectedField ? ' active' : ''}" data-dropdown-field="${escapeHtml(f.key)}">${escapeHtml(f.label)}</button>`).join('');
     return `
@@ -1535,12 +1566,14 @@
         <div class="two-col">
           <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Label</th><th>Order</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">No options yet.</td></tr>'}</tbody></table></div>
           <div>
-            <p class="eyebrow" style="margin-bottom:8px">Add option</p>
+            <p class="eyebrow" style="margin-bottom:8px" id="referenceFormTitle">Add option</p>
             <div class="form-grid">
               <input id="referenceLabel" class="span-2" placeholder="Label (e.g. Verbal warning)">
               <input id="referenceSortOrder" type="number" value="100" placeholder="Sort order">
               <select id="referenceActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+              <input type="hidden" id="referenceEditId" value="">
               <button class="button span-2" id="saveReferenceOptionButton">Add</button>
+              <button class="button secondary span-2 hidden" id="cancelReferenceEditButton">Cancel edit</button>
             </div>
           </div>
         </div>
@@ -1607,43 +1640,75 @@
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
     const CONTENT_TYPES = ['concerns', 'meetings', 'actions', 'chronology', 'radar'];
-    Array.from(document.querySelectorAll('.visibility-toggle')).forEach((btn) => {
+    Array.from(document.querySelectorAll('.vis-level-btn')).forEach((btn) => {
       btn.onclick = () => {
-        const ruleIds = (btn.dataset.ruleIds || '').split(',').filter(Boolean);
-        const sourceId = btn.dataset.sourceId;
-        const targetId = btn.dataset.targetId;
-        if (ruleIds.length) {
-          // Already granted — delete all rules for this pair
-          Promise.all(ruleIds.map((id) =>
-            callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: id } })
-          )).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); });
+        const { sourceId, targetId, contentType, level, ruleId, current } = btn.dataset;
+        if (level === current) return; // already at this level — no-op
+        const doSave = (afterDelete) => {
+          if (level === 'none') {
+            // Just deleted, nothing to add
+            bustCache('settings:reference');
+            renderSettingsPage();
+          } else {
+            callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: level } })
+              .then(() => { bustCache('settings:reference'); renderSettingsPage(); });
+          }
+        };
+        if (ruleId) {
+          callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: ruleId } })
+            .then(doSave);
         } else {
-          // Grant — upsert a rule for each content type at full visibility
-          Promise.all(CONTENT_TYPES.map((ct) =>
-            callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType: ct, visibilityLevel: 'full' } })
-          )).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); });
+          doSave();
         }
       };
     });
     Array.from(document.querySelectorAll('[data-dropdown-field]')).forEach((btn) => {
       btn.onclick = () => {
         state.dropdownSettingsField = btn.dataset.dropdownField;
-        updateRoute({ page: 'settings', settingsTab: 'dropdowns' });
+        renderSettingsPage();
       };
     });
+    // Edit reference option — populate form
+    Array.from(document.querySelectorAll('[data-edit-reference-option]')).forEach((btn) => {
+      btn.onclick = () => {
+        document.getElementById('referenceLabel').value = btn.dataset.label;
+        document.getElementById('referenceSortOrder').value = btn.dataset.sort;
+        document.getElementById('referenceActive').value = btn.dataset.active;
+        document.getElementById('referenceEditId').value = btn.dataset.id;
+        document.getElementById('referenceFormTitle').textContent = 'Edit option';
+        document.getElementById('saveReferenceOptionButton').textContent = 'Save changes';
+        document.getElementById('cancelReferenceEditButton').classList.remove('hidden');
+        document.getElementById('referenceLabel').focus();
+      };
+    });
+    const cancelReferenceEditButton = document.getElementById('cancelReferenceEditButton');
+    if (cancelReferenceEditButton) cancelReferenceEditButton.onclick = () => {
+      document.getElementById('referenceEditId').value = '';
+      document.getElementById('referenceLabel').value = '';
+      document.getElementById('referenceSortOrder').value = '100';
+      document.getElementById('referenceActive').value = 'true';
+      document.getElementById('referenceFormTitle').textContent = 'Add option';
+      document.getElementById('saveReferenceOptionButton').textContent = 'Add';
+      cancelReferenceEditButton.classList.add('hidden');
+    };
     const saveReferenceOptionButton = document.getElementById('saveReferenceOptionButton');
     if (saveReferenceOptionButton) saveReferenceOptionButton.onclick = () => {
       const fieldKey = state.dropdownSettingsField || 'incident_type';
-      const label = document.getElementById('referenceLabel').value;
+      const label = (document.getElementById('referenceLabel').value || '').trim();
       if (!label) return showMessage('Label is required.', 'error');
-      callServer({ path: '/api/settings/reference-options', method: 'post', payload: { areaKey: 'concerns', fieldKey, optionKey: label.toLowerCase().replace(/[^a-z0-9]+/g, '_'), label, sortOrder: document.getElementById('referenceSortOrder').value, isActive: document.getElementById('referenceActive').value === 'true' } })
-        .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Option added.'); });
+      const editId = document.getElementById('referenceEditId').value;
+      const optionKey = editId ? undefined : label.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const payload = { areaKey: 'concerns', fieldKey, label, sortOrder: document.getElementById('referenceSortOrder').value, isActive: document.getElementById('referenceActive').value === 'true' };
+      if (editId) payload.referenceOptionId = editId;
+      else payload.optionKey = optionKey;
+      callServer({ path: '/api/settings/reference-options', method: 'post', payload })
+        .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage(editId ? 'Option updated.' : 'Option added.'); });
     };
     Array.from(document.querySelectorAll('[data-delete-reference-option]')).forEach((btn) => {
       btn.onclick = () => {
         if (!confirm('Delete dropdown option: ' + btn.dataset.label + '?')) return;
         callServer({ path: '/api/settings/reference-options/delete', method: 'post', payload: { referenceOptionId: btn.dataset.id } })
-          .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Dropdown option deleted.'); });
+          .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage('Dropdown option deleted.'); });
       };
     });
   }

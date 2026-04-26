@@ -1253,10 +1253,22 @@ function createApi(env, actorEmail) {
 
   async function saveReferenceOption(auth, body) {
     await assertPermission(auth, 'settings.reference.manage');
-    if (!body.areaKey || !body.fieldKey || !body.optionKey || !body.label) {
-      throw new AppError('areaKey, fieldKey, optionKey, and label are required');
+    if (!body.areaKey || !body.fieldKey || !body.label) {
+      throw new AppError('areaKey, fieldKey, and label are required');
     }
     assertManagedReferenceField(body.areaKey, body.fieldKey);
+    // Update-by-ID path
+    if (body.referenceOptionId) {
+      const existing = await queryOne('SELECT id FROM reference_options WHERE id = $1 AND deleted_at IS NULL', [body.referenceOptionId]);
+      if (!existing) throw new AppError('Reference option not found', 404);
+      const referenceOption = await queryOne(
+        'UPDATE reference_options SET label = $1, sort_order = $2, is_active = $3, updated_at = NOW(), updated_by = $4 WHERE id = $5 RETURNING *',
+        [body.label, Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0, body.isActive !== false, auth.userId, body.referenceOptionId]
+      );
+      await writeAuditLog(auth, { areaKey: 'settings.reference', actionKey: 'update', entityType: 'reference_option', entityId: body.referenceOptionId });
+      return { referenceOption };
+    }
+    if (!body.optionKey) throw new AppError('optionKey is required for new options');
     const optionKey = String(body.optionKey).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
     if (!optionKey) throw new AppError('optionKey must contain letters or numbers');
     const referenceOption = await queryOne(
