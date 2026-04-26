@@ -78,6 +78,7 @@ function makeEnv(options = {}) {
       if (sql.includes('DELETE FROM user_roles')) return [];
       if (sql.includes('DELETE FROM user_teams')) return [];
       if (sql.includes('UPDATE users SET is_active = FALSE')) return [{ id: params[1], email: 'removed@example.org', display_name: 'Removed User' }];
+      if (sql.includes('UPDATE team_visibility_rules SET deleted_at')) return [{ id: params[1], target_team_id: TARGET_TEAM }];
       if (sql.includes('INSERT INTO audit_logs')) return [];
       return [];
     },
@@ -412,6 +413,14 @@ test('settings user delete protects admin accounts', async () => {
     () => api.dispatch({ path: '/api/settings/users/delete', method: 'post', payload: { userId: targetUserId } }),
     /Admin accounts cannot be deleted/
   );
+});
+
+test('settings visibility rule delete soft-deletes the rule', async () => {
+  const ruleId = '99999999-9999-9999-9999-999999999999';
+  const env = makeEnv({ permissions: ['settings.visibility.manage'] });
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: ruleId } });
+  assert.ok(env.calls.some((call) => call.sql.includes('UPDATE team_visibility_rules SET deleted_at') && call.params[1] === ruleId));
 });
 
 test('referral fields are redacted at summary visibility', () => {

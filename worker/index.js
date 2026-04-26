@@ -1291,6 +1291,18 @@ function createApi(env, actorEmail) {
     return { visibilityRule };
   }
 
+  async function deleteVisibilityRule(auth, body) {
+    await assertPermission(auth, 'settings.visibility.manage');
+    if (!body.visibilityRuleId) throw new AppError('visibilityRuleId is required');
+    const visibilityRule = await queryOne(
+      'UPDATE team_visibility_rules SET deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id, target_team_id',
+      [auth.userId, body.visibilityRuleId]
+    );
+    if (!visibilityRule) throw new AppError('Sharing rule not found', 404);
+    await writeAuditLog(auth, { areaKey: 'settings.visibility', actionKey: 'delete', entityType: 'team_visibility_rule', entityId: visibilityRule.id, targetTeamId: visibilityRule.target_team_id });
+    return { visibilityRule };
+  }
+
   async function saveFilter(auth, body) {
     await assertPermission(auth, 'settings.view');
     if (!body.areaKey || !body.name || !body.filterExpression) throw new AppError('areaKey, name, and filterExpression are required');
@@ -1332,6 +1344,7 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/settings/roles') return saveRole(auth, payload);
     if (method === 'post' && path === '/api/settings/teams') return saveTeam(auth, payload);
     if (method === 'post' && path === '/api/settings/visibility-rules') return saveVisibilityRule(auth, payload);
+    if (method === 'post' && path === '/api/settings/visibility-rules/delete') return deleteVisibilityRule(auth, payload);
     if (method === 'post' && path === '/api/settings/user-roles') return assignUserRole(auth, payload);
     if (method === 'post' && path === '/api/settings/user-teams') return assignUserTeam(auth, payload);
     if (method === 'post' && path === '/api/saved-filters') return saveFilter(auth, payload);

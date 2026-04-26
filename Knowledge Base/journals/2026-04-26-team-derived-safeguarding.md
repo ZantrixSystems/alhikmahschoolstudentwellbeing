@@ -43,3 +43,8 @@ on it.
 - Consolidated Settings > Users so account details, primary team, team membership, roles, active state, and delete access are handled in one edit form.
 - Removed the separate Role Assignment tab from the normal Settings navigation; the dedicated Roles tab remains for defining role permission sets.
 - The Worker now accepts `teamIds` and `roleIds` on `/api/settings/users` and replaces the user's assignments in the same save operation.
+
+## Follow-up team sharing deletion
+
+- Added a Delete action to Settings > Team Sharing rows.
+- Added `/api/settings/visibility-rules/delete` to soft-delete sharing rules and audit the change.

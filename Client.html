@@ -1429,10 +1429,14 @@
         <td>${escapeHtml(friendlyLabel(r.content_type))}</td>
         <td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td>
         <td><button class="text-button" data-edit-rule
+          data-id="${escapeHtml(r.id)}"
           data-source="${escapeHtml(r.source_team_id)}"
           data-target="${escapeHtml(r.target_team_id)}"
           data-content="${escapeHtml(r.content_type)}"
-          data-level="${escapeHtml(r.visibility_level)}">Edit</button></td>
+          data-level="${escapeHtml(r.visibility_level)}">Edit</button>
+          <button class="text-button" data-delete-rule
+            data-id="${escapeHtml(r.id)}"
+            data-label="${escapeHtml(r.source_team_name + ' to ' + r.target_team_name + ' / ' + friendlyLabel(r.content_type))}">Delete</button></td>
       </tr>`).join('');
     return `
       <article class="panel compact-panel">
@@ -1534,6 +1538,13 @@
         ruleForm.classList.remove('hidden');
         addRuleToggle.classList.add('hidden');
         ruleForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+    });
+    Array.from(document.querySelectorAll('[data-delete-rule]')).forEach((btn) => {
+      btn.onclick = () => {
+        if (!confirm('Delete sharing rule: ' + btn.dataset.label + '?')) return;
+        callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: btn.dataset.id } })
+          .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule deleted.'); });
       };
     });
   }
