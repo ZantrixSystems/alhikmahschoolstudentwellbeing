@@ -21,6 +21,6 @@
   },
   "devDependencies": {
     "@google/clasp": "^3.3.0",
-    "wrangler": "^4.13.2"
+    "wrangler": "^4.85.0"
   }
 }
