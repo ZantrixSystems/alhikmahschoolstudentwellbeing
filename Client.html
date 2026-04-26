@@ -1381,11 +1381,17 @@
         <td>${teams}</td>
         <td>${roles}</td>
         <td><span class="badge ${u.is_active ? '' : 'secondary'}">${u.is_active ? 'Active' : 'Inactive'}</span></td>
-        <td><button class="text-button" data-edit-user
-          data-id="${escapeHtml(u.id)}"
-          data-email="${escapeHtml(u.email)}"
-          data-name="${escapeHtml(u.display_name)}"
-          data-active="${u.is_active}">Edit</button></td>
+        <td style="white-space:nowrap">
+          <button class="text-button" data-edit-user
+            data-id="${escapeHtml(u.id)}"
+            data-email="${escapeHtml(u.email)}"
+            data-name="${escapeHtml(u.display_name)}"
+            data-active="${u.is_active}" style="margin-right:8px">Edit</button>
+          <button class="text-button" data-delete-user
+            data-id="${escapeHtml(u.id)}"
+            data-email="${escapeHtml(u.email)}"
+            style="color:#c0392b">Delete</button>
+        </td>
       </tr>`;
     }).join('');
     return `
@@ -1636,8 +1642,18 @@
       const email = document.getElementById('editUserEmail').value;
       if (!confirm('Delete access for ' + email + '?')) return;
       callServer({ path: '/api/settings/users/delete', method: 'post', payload: { userId } })
-        .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User deleted.'); });
+        .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage('User deleted.'); });
     };
+    Array.from(document.querySelectorAll('[data-delete-user]')).forEach((btn) => {
+      btn.onclick = () => {
+        const userId = btn.dataset.id;
+        const email = btn.dataset.email;
+        if (!confirm('Delete access for ' + email + '?')) return;
+        callServer({ path: '/api/settings/users/delete', method: 'post', payload: { userId } })
+          .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage('User deleted.'); })
+          .catch((e) => showMessage('Delete failed: ' + e.message, 'error'));
+      };
+    });
 
     // Edit user — populate panel
     Array.from(document.querySelectorAll('[data-edit-user]')).forEach((btn) => {
