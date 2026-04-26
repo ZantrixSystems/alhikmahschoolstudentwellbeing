@@ -1353,12 +1353,15 @@
 
     const cachedRef = getCached('settings:reference');
     if (cachedRef) {
-      // Paint immediately from cache, then silently refresh in background.
       paintTab(cachedRef);
-      callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
-        setCached('settings:reference', data);
-        paintTab(data);
-      }).catch(() => {});
+      // Only background-refresh when not in edit mode — concurrent google.script.run
+      // calls are unreliable and would race with any save the user triggers.
+      if (!state.visibilityEditMode) {
+        callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
+          setCached('settings:reference', data);
+          paintTab(data);
+        }).catch(() => {});
+      }
     } else {
       document.getElementById('settingsBody').innerHTML = skeletonRows(8);
       callServer({ path: '/api/settings/reference', method: 'get' }).then((data) => {
