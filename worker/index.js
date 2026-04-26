@@ -39,7 +39,7 @@ export default {
       return json({
         ok: false,
         error: {
-          message: status >= 500 ? 'Worker request failed' : error.message,
+          message: error.message,
           details: error.details || null,
         },
       }, status);

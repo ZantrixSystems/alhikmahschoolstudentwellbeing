@@ -458,6 +458,13 @@
     }
   }
 
+  function buildReferenceOptions(areaKey, fieldKey, selectedValue) {
+    const opts = (state.bootstrap.referenceOptions || []).filter((o) => o.area_key === areaKey && o.field_key === fieldKey && o.is_active !== false);
+    return opts.map((o) => `<option value="${escapeHtml(o.option_key)}"${o.option_key === selectedValue ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+  }
+  function incidentTypeOptions(selected) { return buildReferenceOptions('concerns', 'incident_type', selected || ''); }
+  function actionTakenOptions(selected) { return buildReferenceOptions('concerns', 'action_taken', selected || ''); }
+
   function profileActionForm(action, data) {
     const teams = (state.bootstrap.teams || []).map((team) => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
     const studentId = state.route.studentId;
@@ -1073,7 +1080,7 @@
     target.innerHTML = '<section class="panel"><p class="muted">Loading profile...</p></section>';
     const profileGuard = getRenderGuard();
     callServer({ path: '/api/students/' + encodeURIComponent(state.route.studentId), method: 'get' }).then((data) => {
-      if (!profileGuard()) return;
+      if (!profileGuard()) { console.warn('profileGuard killed render, renderGeneration=', renderGeneration); return; }
       state.profileData = data;
       const student = data.profile;
       const openConcernCount = (data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status)).length;
