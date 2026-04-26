@@ -57,11 +57,9 @@
 
   function callServer(request) {
     setStatus('Loading');
-    console.log('[callServer]', request.method, request.path);
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler((result) => {
-          console.log('[callServer] OK', request.path);
           setStatus('');
           resolve(result);
         })
