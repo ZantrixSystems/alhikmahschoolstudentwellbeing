@@ -1033,10 +1033,23 @@
           data-level="${escapeHtml(r.visibility_level)}">Edit</button></td>
       </tr>`).join('');
     return `
-      <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Whose data</th><th>Who can see it</th><th>What they can see</th><th>How much</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></article>
-        <article class="panel compact-panel"><h3 class="section-title" id="visibilityFormTitle">Add Sharing Rule</h3><div class="form-grid"><label class="span-2" style="font-size:0.8rem;color:var(--muted)">From team (owner)</label><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><label class="span-2" style="font-size:0.8rem;color:var(--muted)">To team (can see)</label><select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
-      </div>`;
+      <article class="panel compact-panel">
+        <div class="panel-header">
+          <div><h3 class="section-title">Team Sharing</h3></div>
+          <button class="button secondary" id="addRuleToggle">+ Add rule</button>
+        </div>
+        <div id="visibilityRuleForm" class="inline-form hidden" style="margin-bottom:10px">
+          <div class="form-grid">
+            <select id="visibilitySource">${teamOptions}</select>
+            <select id="visibilityTarget">${teamOptions}</select>
+            <select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select>
+            <select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select>
+            <button class="button" id="saveVisibilityButton">Save rule</button>
+            <button class="button secondary" id="cancelVisibilityButton">Cancel</button>
+          </div>
+        </div>
+        <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Whose data</th><th>Who can see it</th><th>What they can see</th><th>How much</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      </article>`;
   }
 
   function renderSavedFiltersSettings(data) {
@@ -1054,18 +1067,23 @@
     if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { bustCache('settings:reference'); showMessage('Role saved.'); });
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
+    const ruleForm = document.getElementById('visibilityRuleForm');
+    const addRuleToggle = document.getElementById('addRuleToggle');
+    const cancelVisibilityButton = document.getElementById('cancelVisibilityButton');
+    if (addRuleToggle) addRuleToggle.onclick = () => { ruleForm.classList.remove('hidden'); addRuleToggle.classList.add('hidden'); };
+    if (cancelVisibilityButton) cancelVisibilityButton.onclick = () => { ruleForm.classList.add('hidden'); addRuleToggle.classList.remove('hidden'); };
     const saveVisibilityButton = document.getElementById('saveVisibilityButton');
     if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule saved.'); });
     Array.from(document.querySelectorAll('[data-edit-rule]')).forEach((btn) => {
       btn.onclick = () => {
-        const setVal = (id, val) => { const el = document.getElementById(id); if (el) { el.value = val; } };
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
         setVal('visibilitySource', btn.dataset.source);
         setVal('visibilityTarget', btn.dataset.target);
         setVal('visibilityContent', btn.dataset.content);
         setVal('visibilityLevel', btn.dataset.level);
-        const title = document.getElementById('visibilityFormTitle');
-        if (title) title.textContent = 'Edit Sharing Rule';
-        document.getElementById('visibilitySource').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        ruleForm.classList.remove('hidden');
+        addRuleToggle.classList.add('hidden');
+        ruleForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       };
     });
   }
