@@ -1020,10 +1020,22 @@
 
   function renderVisibilitySettings(data) {
     const teamOptions = (data.teams || []).map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    const rows = (data.visibilityRules || []).map((r) => `
+      <tr>
+        <td>${escapeHtml(r.source_team_name)}</td>
+        <td>${escapeHtml(r.target_team_name)}</td>
+        <td>${escapeHtml(friendlyLabel(r.content_type))}</td>
+        <td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td>
+        <td><button class="text-button" data-edit-rule
+          data-source="${escapeHtml(r.source_team_id)}"
+          data-target="${escapeHtml(r.target_team_id)}"
+          data-content="${escapeHtml(r.content_type)}"
+          data-level="${escapeHtml(r.visibility_level)}">Edit</button></td>
+      </tr>`).join('');
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>From</th><th>To</th><th>Record</th><th>Access</th></tr></thead><tbody>${(data.visibilityRules || []).map((r) => `<tr><td>${escapeHtml(r.source_team_name)}</td><td>${escapeHtml(r.target_team_name)}</td><td>${escapeHtml(friendlyLabel(r.content_type))}</td><td>${escapeHtml(friendlyVisibility(r.visibility_level))}</td></tr>`).join('')}</tbody></table></div></article>
-        <article class="panel compact-panel"><h3 class="section-title">Add Sharing Rule</h3><div class="form-grid"><label class="span-2" style="font-size:0.8rem;color:var(--muted)">From team (owner)</label><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><label class="span-2" style="font-size:0.8rem;color:var(--muted)">To team (can see)</label><select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Team Sharing</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>From</th><th>To</th><th>Record</th><th>Access</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title" id="visibilityFormTitle">Add Sharing Rule</h3><div class="form-grid"><label class="span-2" style="font-size:0.8rem;color:var(--muted)">From team (owner)</label><select id="visibilitySource">${teamOptions}</select><select id="visibilityTarget">${teamOptions}</select><label class="span-2" style="font-size:0.8rem;color:var(--muted)">To team (can see)</label><select id="visibilityContent"><option value="radar">Radar records</option><option value="concerns">Concerns</option><option value="meetings">Meetings</option><option value="actions">Follow-ups</option><option value="chronology">Timeline</option></select><select id="visibilityLevel"><option value="none">Hidden</option><option value="indicator">Exists only</option><option value="summary">Summary</option><option value="full">Full detail</option></select><button class="button span-2" id="saveVisibilityButton">Save rule</button></div></article>
       </div>`;
   }
 
@@ -1043,7 +1055,19 @@
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
     const saveVisibilityButton = document.getElementById('saveVisibilityButton');
-    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { bustCache('settings:reference'); showMessage('Sharing rule saved.'); });
+    if (saveVisibilityButton) saveVisibilityButton.onclick = () => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: document.getElementById('visibilitySource').value, targetTeamId: document.getElementById('visibilityTarget').value, contentType: document.getElementById('visibilityContent').value, visibilityLevel: document.getElementById('visibilityLevel').value } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule saved.'); });
+    Array.from(document.querySelectorAll('[data-edit-rule]')).forEach((btn) => {
+      btn.onclick = () => {
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) { el.value = val; } };
+        setVal('visibilitySource', btn.dataset.source);
+        setVal('visibilityTarget', btn.dataset.target);
+        setVal('visibilityContent', btn.dataset.content);
+        setVal('visibilityLevel', btn.dataset.level);
+        const title = document.getElementById('visibilityFormTitle');
+        if (title) title.textContent = 'Edit Sharing Rule';
+        document.getElementById('visibilitySource').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      };
+    });
   }
 
   function loadAuditLog() {
