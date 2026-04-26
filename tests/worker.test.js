@@ -57,6 +57,9 @@ function makeEnv(options = {}) {
       if (sql.includes('SELECT team_key FROM teams WHERE id = $1')) {
         return teamRows.filter((team) => team.id === params[0]);
       }
+      if (sql.includes('INSERT INTO users')) {
+        return [{ id: 'saved-user-id', email: params[0], display_name: params[1], primary_team_id: params[2], is_active: params[3] }];
+      }
       if (sql.includes('FROM students s') && sql.includes('GROUP BY s.id') && sql.includes('AS flags')) {
         return profileRows;
       }
@@ -362,6 +365,28 @@ test('settings reference includes user team assignments', async () => {
   }), 'worker.test@alhikmah.example.org');
   const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
   assert.deepEqual(data.userTeams, [{ user_id: USER_ID, team_id: SOURCE_TEAM, team_name: 'Pastoral' }]);
+});
+
+test('settings user save replaces teams and roles in one request', async () => {
+  const roleId = '88888888-8888-8888-8888-888888888888';
+  const env = makeEnv({ permissions: ['settings.users.manage'] });
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/settings/users',
+    method: 'post',
+    payload: {
+      email: 'new.user@example.org',
+      displayName: 'New User',
+      primaryTeamId: SOURCE_TEAM,
+      teamIds: [TARGET_TEAM],
+      roleIds: [roleId],
+      isActive: true,
+    },
+  });
+  assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_teams') && call.params[0] === 'saved-user-id'));
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO user_teams') && call.params[1].includes(SOURCE_TEAM) && call.params[1].includes(TARGET_TEAM)));
+  assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_roles') && call.params[0] === 'saved-user-id'));
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO user_roles') && call.params[1].includes(roleId)));
 });
 
 test('settings user delete soft-deletes non-admin accounts', async () => {

@@ -1219,8 +1219,22 @@ function createApi(env, actorEmail) {
   async function saveUser(auth, body) {
     await assertPermission(auth, 'settings.users.manage');
     if (!body.email || !body.displayName) throw new AppError('email and displayName are required');
+    const roleIds = Array.isArray(body.roleIds) ? compactUnique(body.roleIds) : null;
+    const teamIds = Array.isArray(body.teamIds) ? compactUnique((body.primaryTeamId ? [body.primaryTeamId] : []).concat(body.teamIds)) : null;
     const user = await queryOne('INSERT INTO users (email, display_name, primary_team_id, is_active, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, primary_team_id = EXCLUDED.primary_team_id, is_active = EXCLUDED.is_active, deleted_at = NULL, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [String(body.email).toLowerCase(), body.displayName, body.primaryTeamId || null, body.isActive !== false, auth.userId]);
-    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: 'upsert', entityType: 'user', entityId: user.id, metadata: { email: user.email, isActive: user.is_active } });
+    if (teamIds) {
+      await query('DELETE FROM user_teams WHERE user_id = $1', [user.id]);
+      if (teamIds.length) {
+        await query('INSERT INTO user_teams (user_id, team_id, created_by) SELECT $1, t.id, $3 FROM teams t WHERE t.id = ANY($2::uuid[]) AND t.deleted_at IS NULL ON CONFLICT DO NOTHING', [user.id, teamIds, auth.userId]);
+      }
+    }
+    if (roleIds) {
+      await query('DELETE FROM user_roles WHERE user_id = $1', [user.id]);
+      if (roleIds.length) {
+        await query('INSERT INTO user_roles (user_id, role_id, created_by) SELECT $1, r.id, $3 FROM roles r WHERE r.id = ANY($2::uuid[]) AND r.deleted_at IS NULL ON CONFLICT DO NOTHING', [user.id, roleIds, auth.userId]);
+      }
+    }
+    await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: 'upsert', entityType: 'user', entityId: user.id, metadata: { email: user.email, isActive: user.is_active, teamCount: teamIds ? teamIds.length : null, roleCount: roleIds ? roleIds.length : null } });
     return { user };
   }
 

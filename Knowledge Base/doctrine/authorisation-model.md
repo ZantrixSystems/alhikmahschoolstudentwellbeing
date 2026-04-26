@@ -15,6 +15,7 @@
 - Teams do not grant permissions; they scope operational visibility
 - User records alone do not grant access; a user requires assigned roles with permissions
 - Removing a user in Settings soft-deletes and deactivates the user and removes their roles and teams
+- Settings > Users saves account details, team membership, and role assignment together so access changes are applied as one administrative action
 
 ## Enforcement Layers
 

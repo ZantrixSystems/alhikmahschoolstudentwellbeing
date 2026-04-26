@@ -37,3 +37,9 @@ on it.
 - Deleted users are deactivated, assigned roles and teams are removed, and `deleted_at` prevents authentication.
 - Re-adding the same email clears `deleted_at` but does not restore old roles or teams.
 - Confirmed default access remains none: a user record without assigned roles has no app permissions.
+
+## Follow-up user administration UX
+
+- Consolidated Settings > Users so account details, primary team, team membership, roles, active state, and delete access are handled in one edit form.
+- Removed the separate Role Assignment tab from the normal Settings navigation; the dedicated Roles tab remains for defining role permission sets.
+- The Worker now accepts `teamIds` and `roleIds` on `/api/settings/users` and replaces the user's assignments in the same save operation.
