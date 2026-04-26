@@ -60,8 +60,10 @@
           resolve(result);
         })
         .withFailureHandler((error) => {
+          console.error(error);
           setStatus('Error');
-          showMessage('Something went wrong. Please try again or contact support.', 'error');
+          const message = error && error.message ? String(error.message).replace(/^Error:\s*/, '') : '';
+          showMessage(message || 'Something went wrong. Please try again or contact support.', 'error');
           reject(error);
         })
         .apiProxy(request);

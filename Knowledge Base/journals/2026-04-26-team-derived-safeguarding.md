@@ -15,6 +15,7 @@ for safeguarding confidentiality and referral handling.
 - `Client.html`: concern cards no longer display category badges; team ownership is shown instead.
 - `worker/index.js`: `createConcern` no longer requires a category from the client.
 - `worker/index.js`: create/update derive backend category and confidentiality from the concern team.
+  Non-safeguarding concerns use the existing backend category `wellbeing` as the compatibility fallback.
 - `worker/index.js`: non-safeguarding callers cannot set safeguarding confidentiality directly.
 - `worker/index.js`: the dashboard safeguarding panel now filters by Safeguarding team ownership.
 

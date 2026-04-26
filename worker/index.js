@@ -873,7 +873,7 @@ function createApi(env, actorEmail) {
     }
     const requestedConfidentiality = body.confidentialityLevel || 'summary';
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
-    const derivedCategory = isSafeguarding ? 'safeguarding' : 'general';
+    const derivedCategory = isSafeguarding ? 'safeguarding' : 'wellbeing';
     const concern = await queryOne(
       [
         'INSERT INTO concerns',
@@ -960,7 +960,7 @@ function createApi(env, actorEmail) {
     }
     const requestedConfidentiality = body.confidentialityLevel !== undefined ? (body.confidentialityLevel || 'summary') : (existing.confidentiality_level || 'summary');
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
-    const derivedCategory = isSafeguarding ? 'safeguarding' : 'general';
+    const derivedCategory = isSafeguarding ? 'safeguarding' : (existing.category === 'safeguarding' ? 'wellbeing' : existing.category);
 
     const concern = await queryOne(
       [
