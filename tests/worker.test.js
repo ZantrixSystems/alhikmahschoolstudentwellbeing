@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApi, hmacHex, verifySignedAppsScriptRequest, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES, VALID_INCIDENT_TYPES, VALID_SANCTION_TYPES } from '../worker/index.js';
+import { createApi, hmacHex, verifySignedAppsScriptRequest, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES } from '../worker/index.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const SOURCE_TEAM = '22222222-2222-2222-2222-222222222222';
@@ -22,6 +22,10 @@ function makeEnv(options = {}) {
   const teamRows = options.teamRows || [];
   const userTeamRows = options.userTeamRows || [];
   const userRowsById = options.userRowsById || [];
+  const referenceOptions = options.referenceOptions || [
+    { id: 'ref-incident-verbal', area_key: 'concerns', field_key: 'incident_type', option_key: 'verbal', label: 'Verbal incident', sort_order: 10, is_active: true, is_system: true },
+    { id: 'ref-action-parent', area_key: 'concerns', field_key: 'action_taken', option_key: 'parent_contacted', label: 'Parent/carer contacted', sort_order: 10, is_active: true, is_system: true },
+  ];
 
   const env = {
     WORKER_SHARED_SECRET: 'test-secret',
@@ -33,6 +37,36 @@ function makeEnv(options = {}) {
           { key: 'auth.enforceDomainRestriction', value: false },
           { key: 'auth.allowedDomains', value: [] },
         ];
+      }
+      if (sql.includes('FROM reference_options') && sql.includes('option_key = $3')) {
+        return referenceOptions.filter((option) => (
+          option.area_key === params[0] &&
+          option.field_key === params[1] &&
+          option.option_key === params[2] &&
+          option.is_active !== false
+        ));
+      }
+      if (sql.includes('FROM reference_options') && sql.includes('ORDER BY area_key')) {
+        return referenceOptions;
+      }
+      if (sql.includes('SELECT id, area_key, field_key, option_key, is_system FROM reference_options')) {
+        return referenceOptions.filter((option) => option.id === params[0]);
+      }
+      if (sql.includes('INSERT INTO reference_options')) {
+        return [{
+          id: 'ref-saved',
+          area_key: params[0],
+          field_key: params[1],
+          option_key: params[2],
+          label: params[3],
+          description: params[4],
+          sort_order: params[5],
+          is_active: params[6],
+          is_system: false,
+        }];
+      }
+      if (sql.includes('UPDATE reference_options SET is_active = FALSE')) {
+        return [referenceOptions.find((option) => option.id === params[1]) || { id: params[1] }];
       }
       if (sql.includes('FROM users u') && sql.includes('LOWER(u.email)')) {
         return [{
@@ -368,6 +402,16 @@ test('settings reference includes user team assignments', async () => {
   assert.deepEqual(data.userTeams, [{ user_id: USER_ID, team_id: SOURCE_TEAM, team_name: 'Pastoral' }]);
 });
 
+test('settings reference includes managed dropdown options', async () => {
+  const api = createApi(makeEnv({
+    permissions: ['settings.view'],
+    referenceOptions: [{ id: 'ref-1', area_key: 'concerns', field_key: 'incident_type', option_key: 'verbal', label: 'Verbal incident', sort_order: 10, is_active: true, is_system: true }],
+  }), 'worker.test@alhikmah.example.org');
+  const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
+  assert.equal(data.referenceOptions.length, 1);
+  assert.equal(data.referenceOptions[0].field_key, 'incident_type');
+});
+
 test('settings user save replaces teams and roles in one request', async () => {
   const roleId = '88888888-8888-8888-8888-888888888888';
   const env = makeEnv({ permissions: ['settings.users.manage'] });
@@ -423,6 +467,30 @@ test('settings visibility rule delete soft-deletes the rule', async () => {
   assert.ok(env.calls.some((call) => call.sql.includes('UPDATE team_visibility_rules SET deleted_at') && call.params[1] === ruleId));
 });
 
+test('saving a reference option requires settings reference permission', async () => {
+  const api = createApi(makeEnv({ permissions: ['settings.view'] }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/settings/reference-options',
+      method: 'post',
+      payload: { areaKey: 'concerns', fieldKey: 'incident_type', optionKey: 'low_level', label: 'Low level' },
+    }),
+    /Missing permission: settings\.reference\.manage/
+  );
+});
+
+test('saving a reference option is audited', async () => {
+  const env = makeEnv({ permissions: ['settings.reference.manage'] });
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/settings/reference-options',
+    method: 'post',
+    payload: { areaKey: 'concerns', fieldKey: 'incident_type', optionKey: 'low level', label: 'Low level', sortOrder: 90 },
+  });
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO reference_options') && call.params[2] === 'low_level'));
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO audit_logs') && call.params[1] === 'settings.reference' && call.params[2] === 'upsert'));
+});
+
 test('referral fields are redacted at summary visibility', () => {
   // Import createApi and exercise redactRecord indirectly via applyVisibility
   // We test by checking that referral_outcome is absent at summary level
@@ -474,24 +542,25 @@ test('creating a concern with invalid incident_type is rejected', async () => {
   );
 });
 
-test('creating a concern with invalid sanction_type is rejected', async () => {
-  const api = createApi(makeEnv({ permissions: ['concerns.create'] }), 'worker.test@alhikmah.example.org');
-  await assert.rejects(
-    () => api.dispatch({
-      path: '/api/concerns', method: 'post',
-      payload: { studentId: STUDENT_ID, category: 'behaviour', title: 'T', summary: 'S', sanctionType: 'suspended' },
-    }),
-    /Invalid sanction_type/
-  );
-});
-
-test('VALID_INCIDENT_TYPES and VALID_SANCTION_TYPES exports are complete', () => {
-  ['verbal','physical','disruption','bullying','online','damage','substance','other'].forEach(
-    (key) => assert.ok(VALID_INCIDENT_TYPES.includes(key), key + ' missing')
-  );
-  ['none','verbal_warning','detention','isolation','ftes','managed_move','permanent_exclusion'].forEach(
-    (key) => assert.ok(VALID_SANCTION_TYPES.includes(key), key + ' missing')
-  );
+test('creating a concern stores managed incident and action_taken values', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  let insertParams = null;
+  const originalQuery = env.__query.bind(env);
+  env.__query = async (sql, params) => {
+    if (sql.includes('INSERT INTO concerns')) {
+      insertParams = params;
+      return [{ id: 'c-1', student_id: STUDENT_ID }];
+    }
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/concerns',
+    method: 'post',
+    payload: { studentId: STUDENT_ID, title: 'T', summary: 'S', incidentType: 'verbal', actionTaken: 'parent_contacted' },
+  });
+  assert.equal(insertParams[14], 'verbal');
+  assert.equal(insertParams[15], 'parent_contacted');
 });
 
 test('signed request nonce cannot be replayed', async () => {

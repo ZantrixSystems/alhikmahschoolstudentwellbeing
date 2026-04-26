@@ -4,8 +4,9 @@ const VALID_REFERRAL_TYPES = ['none', 'mash', 'lado', 'police', 'early_help', 'c
 const VALID_SEND_CATEGORIES = ['none', 'sen_support', 'ehcp', 'assessed_no_need'];
 const VALID_SEND_PLAN_TYPES = ['sen_support', 'ehcp', 'early_help'];
 const VALID_SEND_PLAN_STATUSES = ['active', 'under_review', 'closed'];
-const VALID_INCIDENT_TYPES = ['verbal','physical','disruption','bullying','online','damage','substance','other'];
-const VALID_SANCTION_TYPES = ['none','verbal_warning','detention','isolation','ftes','managed_move','permanent_exclusion'];
+const MANAGED_REFERENCE_FIELDS = {
+  concerns: ['incident_type', 'action_taken'],
+};
 
 class AppError extends Error {
   constructor(message, statusCode = 400, details = null) {
@@ -231,6 +232,39 @@ function createApi(env, actorEmail) {
   async function getAppSettings(keys) {
     const rows = await query('SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [keys]);
     return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  }
+
+  async function getReferenceOptions(areaKey = null, fieldKey = null, activeOnly = true) {
+    const clauses = ['deleted_at IS NULL'];
+    const params = [];
+    if (areaKey) clauses.push('area_key = ' + pushParam(params, areaKey));
+    if (fieldKey) clauses.push('field_key = ' + pushParam(params, fieldKey));
+    if (activeOnly) clauses.push('is_active = TRUE');
+    return query(
+      [
+        'SELECT id, area_key, field_key, option_key, label, description, team_scope, team_id, sort_order, is_active, is_system',
+        'FROM reference_options',
+        'WHERE ' + clauses.join(' AND '),
+        'ORDER BY area_key, field_key, sort_order, label',
+      ].join('\n'),
+      params
+    );
+  }
+
+  async function assertReferenceOption(areaKey, fieldKey, value) {
+    if (!value) return null;
+    const row = await queryOne(
+      [
+        'SELECT option_key',
+        'FROM reference_options',
+        'WHERE area_key = $1 AND field_key = $2 AND option_key = $3',
+        '  AND is_active = TRUE AND deleted_at IS NULL',
+        'LIMIT 1',
+      ].join('\n'),
+      [areaKey, fieldKey, value]
+    );
+    if (!row) throw new AppError('Invalid ' + fieldKey + ': ' + value);
+    return value;
   }
 
   async function getEffectivePermissionKeys(auth) {
@@ -562,7 +596,7 @@ function createApi(env, actorEmail) {
 
   async function getBootstrapPayload(auth) {
     await assertPermission(auth, 'dashboard.view');
-    const [teams, savedFilters, settings, permissionKeys] = await Promise.all([
+    const [teams, savedFilters, settings, permissionKeys, referenceOptions] = await Promise.all([
       query('SELECT id, team_key, name, accent_color FROM teams WHERE deleted_at IS NULL AND is_active = TRUE ORDER BY name'),
       query(
         [
@@ -575,12 +609,14 @@ function createApi(env, actorEmail) {
       ),
       getAppSettings(['app.name', 'app.mode', 'auth.allowedDomains', 'auth.enforceDomainRestriction']),
       getEffectivePermissionKeys(auth),
+      getReferenceOptions(null, null, true),
     ]);
     return {
       currentUser: { ...auth, permissionKeys },
       teams,
       savedFilters,
       settings,
+      referenceOptions,
       navigation: [
         { key: 'dashboard', label: 'Dashboard' },
         { key: 'students', label: 'Students' },
@@ -766,6 +802,7 @@ function createApi(env, actorEmail) {
           'SELECT c.id, c.team_id, t.name AS team_name, t.team_key AS team_key, c.title, c.summary, c.detail,',
           '  c.status, c.category, c.severity, c.urgency, c.confidentiality_level,',
           '  c.outcome_summary, c.referral_type, c.referral_date, c.referral_outcome,',
+          '  c.incident_type, c.action_taken, c.behaviour_plan_active,',
           '  c.closed_at, c.created_at, c.created_at AS occurred_at,',
           '  closed_by.display_name AS closed_by_name',
           'FROM concerns c',
@@ -857,14 +894,8 @@ function createApi(env, actorEmail) {
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
       throw new AppError('Invalid referral_type: ' + referralType);
     }
-    const incidentType = body.incidentType || null;
-    if (incidentType && !VALID_INCIDENT_TYPES.includes(incidentType)) {
-      throw new AppError('Invalid incident_type: ' + incidentType);
-    }
-    const sanctionType = body.sanctionType || null;
-    if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) {
-      throw new AppError('Invalid sanction_type: ' + sanctionType);
-    }
+    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType || null);
+    const actionTaken = await assertReferenceOption('concerns', 'action_taken', body.actionTaken || body.action_taken || null);
     // Derive confidentiality from the team's key: safeguarding team = safeguarding confidentiality.
     let isSafeguarding = false;
     if (body.teamId) {
@@ -879,7 +910,7 @@ function createApi(env, actorEmail) {
         'INSERT INTO concerns',
         '  (student_id, concern_ref, team_id, submitted_by_user_id, category, severity, urgency,',
         '   confidentiality_level, title, summary, detail, referral_type, referral_date, referral_outcome,',
-        '   incident_type, sanction_type, sanction_duration, behaviour_plan_active,',
+        '   incident_type, action_taken, action_note, behaviour_plan_active,',
         '   created_by, updated_by)',
         'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $4, $4) RETURNING *',
       ].join('\n'),
@@ -888,10 +919,10 @@ function createApi(env, actorEmail) {
         derivedCategory, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
         body.title, body.summary, body.detail || null,
         referralType, body.referralDate || null, body.referralOutcome || null,
-        incidentType, sanctionType, body.sanctionDuration || null, body.behaviourPlanActive === true,
+        incidentType, actionTaken, body.actionNote || null, body.behaviourPlanActive === true,
       ]
     );
-    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, 'summary', null, null, null, null, null);
+    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, 'summary', null, actionTaken, null, null, null);
     await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { severity: body.severity, teamId: body.teamId } });
     return { concern };
   }
@@ -948,10 +979,9 @@ function createApi(env, actorEmail) {
 
     const referralType = body.referralType !== undefined ? body.referralType : existing.referral_type;
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) throw new AppError('Invalid referral_type: ' + referralType);
-    const incidentType = body.incidentType !== undefined ? body.incidentType : existing.incident_type;
-    if (incidentType && !VALID_INCIDENT_TYPES.includes(incidentType)) throw new AppError('Invalid incident_type: ' + incidentType);
-    const sanctionType = body.sanctionType !== undefined ? body.sanctionType : existing.sanction_type;
-    if (sanctionType && !VALID_SANCTION_TYPES.includes(sanctionType)) throw new AppError('Invalid sanction_type: ' + sanctionType);
+    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : existing.incident_type);
+    const submittedActionTaken = body.actionTaken !== undefined ? body.actionTaken : body.action_taken;
+    const actionTaken = await assertReferenceOption('concerns', 'action_taken', submittedActionTaken !== undefined ? submittedActionTaken : existing.action_taken);
     const teamId = body.teamId !== undefined ? (body.teamId || null) : existing.team_id;
     let isSafeguarding = false;
     if (teamId) {
@@ -968,7 +998,7 @@ function createApi(env, actorEmail) {
         '  title = $1, summary = $2, severity = $3, team_id = $4,',
         '  category = $5, confidentiality_level = $6,',
         '  referral_type = $7, referral_date = $8, referral_outcome = $9,',
-        '  incident_type = $10, sanction_type = $11, sanction_duration = $12,',
+        '  incident_type = $10, action_taken = $11, action_note = $12,',
         '  behaviour_plan_active = $13,',
         '  updated_at = NOW(), updated_by = $14',
         'WHERE id = $15 AND deleted_at IS NULL RETURNING *',
@@ -984,8 +1014,8 @@ function createApi(env, actorEmail) {
         body.referralDate !== undefined ? (body.referralDate || null) : existing.referral_date,
         body.referralOutcome !== undefined ? (body.referralOutcome || null) : existing.referral_outcome,
         incidentType || null,
-        sanctionType || null,
-        body.sanctionDuration !== undefined ? (body.sanctionDuration || null) : existing.sanction_duration,
+        actionTaken || null,
+        body.actionNote !== undefined ? (body.actionNote || null) : existing.action_note,
         body.behaviourPlanActive !== undefined ? body.behaviourPlanActive === true : existing.behaviour_plan_active,
         auth.userId,
         concernId,
@@ -1179,7 +1209,7 @@ function createApi(env, actorEmail) {
 
   async function getSettingsReferencePayload(auth) {
     await assertPermission(auth, 'settings.view');
-    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams] = await Promise.all([
+    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, referenceOptions] = await Promise.all([
       query('SELECT id, email, display_name, primary_team_id, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
       query('SELECT id, role_key, name, description, is_system, is_editable FROM roles WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT id, permission_key, area_key, action_key, description FROM permissions ORDER BY permission_key'),
@@ -1188,8 +1218,85 @@ function createApi(env, actorEmail) {
       query('SELECT id, area_key, name, filter_expression, is_shared FROM saved_filters WHERE deleted_at IS NULL ORDER BY area_key, name'),
       query('SELECT ur.user_id, ur.role_id, u.display_name AS user_name, u.email AS user_email, r.role_key, r.name AS role_name FROM user_roles ur JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL ORDER BY u.display_name, r.name'),
       query('SELECT ut.user_id, ut.team_id, t.name AS team_name FROM user_teams ut JOIN teams t ON t.id = ut.team_id AND t.deleted_at IS NULL ORDER BY t.name'),
+      getReferenceOptions(null, null, false),
     ]);
-    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams };
+    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, referenceOptions };
+  }
+
+  function assertManagedReferenceField(areaKey, fieldKey) {
+    if (!MANAGED_REFERENCE_FIELDS[areaKey] || !MANAGED_REFERENCE_FIELDS[areaKey].includes(fieldKey)) {
+      throw new AppError('Reference field is not manageable: ' + areaKey + '.' + fieldKey, 400);
+    }
+  }
+
+  async function saveReferenceOption(auth, body) {
+    await assertPermission(auth, 'settings.reference.manage');
+    if (!body.areaKey || !body.fieldKey || !body.optionKey || !body.label) {
+      throw new AppError('areaKey, fieldKey, optionKey, and label are required');
+    }
+    assertManagedReferenceField(body.areaKey, body.fieldKey);
+    const optionKey = String(body.optionKey).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!optionKey) throw new AppError('optionKey must contain letters or numbers');
+    const referenceOption = await queryOne(
+      [
+        'INSERT INTO reference_options',
+        '  (area_key, field_key, option_key, label, description, team_scope, team_id, sort_order, is_active, is_system, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10, $10)',
+        'ON CONFLICT (area_key, field_key, option_key) DO UPDATE SET',
+        '  label = EXCLUDED.label,',
+        '  description = EXCLUDED.description,',
+        '  sort_order = EXCLUDED.sort_order,',
+        '  is_active = EXCLUDED.is_active,',
+        '  deleted_at = NULL,',
+        '  updated_at = NOW(),',
+        '  updated_by = EXCLUDED.updated_by',
+        'RETURNING *',
+      ].join('\n'),
+      [
+        body.areaKey,
+        body.fieldKey,
+        optionKey,
+        body.label,
+        body.description || null,
+        body.teamId ? 'team' : 'global',
+        body.teamId || null,
+        Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
+        body.isActive !== false,
+        auth.userId,
+      ]
+    );
+    await writeAuditLog(auth, {
+      areaKey: 'settings.reference',
+      actionKey: 'upsert',
+      entityType: 'reference_option',
+      entityId: referenceOption.id,
+      metadata: { areaKey: body.areaKey, fieldKey: body.fieldKey, optionKey },
+    });
+    return { referenceOption };
+  }
+
+  async function deleteReferenceOption(auth, body) {
+    await assertPermission(auth, 'settings.reference.manage');
+    if (!body.referenceOptionId) throw new AppError('referenceOptionId is required');
+    const existing = await queryOne(
+      'SELECT id, area_key, field_key, option_key, is_system FROM reference_options WHERE id = $1 AND deleted_at IS NULL',
+      [body.referenceOptionId]
+    );
+    if (!existing) throw new AppError('Reference option not found', 404);
+    assertManagedReferenceField(existing.area_key, existing.field_key);
+    if (existing.is_system) throw new AppError('System reference options can be deactivated but not deleted', 400);
+    const referenceOption = await queryOne(
+      'UPDATE reference_options SET is_active = FALSE, deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING *',
+      [auth.userId, body.referenceOptionId]
+    );
+    await writeAuditLog(auth, {
+      areaKey: 'settings.reference',
+      actionKey: 'delete',
+      entityType: 'reference_option',
+      entityId: referenceOption.id,
+      metadata: { areaKey: existing.area_key, fieldKey: existing.field_key, optionKey: existing.option_key },
+    });
+    return { referenceOption };
   }
 
   async function assignUserTeam(auth, body) {
@@ -1347,6 +1454,8 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/settings/visibility-rules/delete') return deleteVisibilityRule(auth, payload);
     if (method === 'post' && path === '/api/settings/user-roles') return assignUserRole(auth, payload);
     if (method === 'post' && path === '/api/settings/user-teams') return assignUserTeam(auth, payload);
+    if (method === 'post' && path === '/api/settings/reference-options') return saveReferenceOption(auth, payload);
+    if (method === 'post' && path === '/api/settings/reference-options/delete') return deleteReferenceOption(auth, payload);
     if (method === 'post' && path === '/api/saved-filters') return saveFilter(auth, payload);
     if (method === 'get' && path === '/api/audit-logs') return getAuditLogsPayload(auth);
     throw new AppError('Route not found: ' + path, 404);
@@ -1369,6 +1478,4 @@ export {
   workerQuery,
   VALID_REFERRAL_TYPES,
   VALID_SEND_CATEGORIES,
-  VALID_INCIDENT_TYPES,
-  VALID_SANCTION_TYPES,
 };

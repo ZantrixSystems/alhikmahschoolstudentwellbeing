@@ -531,26 +531,12 @@
           <div class="span-2">
             <div class="form-grid">
               <select id="concernIncidentType">
-                <option value="">Incident type (optional)</option>
-                <option value="verbal">Verbal abuse / aggression</option>
-                <option value="physical">Physical aggression</option>
-                <option value="disruption">Persistent disruption</option>
-                <option value="bullying">Bullying</option>
-                <option value="online">Online / cyberbullying</option>
-                <option value="damage">Property damage</option>
-                <option value="substance">Substance related</option>
-                <option value="other">Other</option>
+                ${incidentTypeOptions()}
               </select>
-              <select id="concernSanctionType">
-                <option value="none">No sanction</option>
-                <option value="verbal_warning">Verbal warning</option>
-                <option value="detention">Detention</option>
-                <option value="isolation">Internal isolation</option>
-                <option value="ftes">Fixed-term exclusion</option>
-                <option value="managed_move">Managed move</option>
-                <option value="permanent_exclusion">Permanent exclusion</option>
+              <select id="concernActionTaken">
+                ${actionTakenOptions()}
               </select>
-              <input id="concernSanctionDuration" placeholder="Sanction duration (e.g. 2 days)">
+              <textarea id="concernActionNote" class="span-2" rows="2" placeholder="Action notes (optional)"></textarea>
               <label class="check-control"><input id="concernBehaviourPlanActive" type="checkbox"> Behaviour plan in place</label>
             </div>
           </div>
@@ -673,8 +659,8 @@
       referralDate: document.getElementById('concernReferralDate') ? document.getElementById('concernReferralDate').value : null,
       referralOutcome: document.getElementById('concernReferralOutcome') ? document.getElementById('concernReferralOutcome').value : null,
       incidentType: document.getElementById('concernIncidentType') ? document.getElementById('concernIncidentType').value : null,
-      sanctionType: document.getElementById('concernSanctionType') ? document.getElementById('concernSanctionType').value : null,
-      sanctionDuration: document.getElementById('concernSanctionDuration') ? document.getElementById('concernSanctionDuration').value : null,
+      actionTaken: document.getElementById('concernActionTaken') ? document.getElementById('concernActionTaken').value : null,
+      actionNote: document.getElementById('concernActionNote') ? document.getElementById('concernActionNote').value : null,
       behaviourPlanActive: document.getElementById('concernBehaviourPlanActive') ? document.getElementById('concernBehaviourPlanActive').checked : false,
     });
     const submitFollow = document.getElementById('submitFollow');
@@ -933,25 +919,12 @@
                   <option value="other"${c.referral_type === 'other' ? ' selected' : ''}>Other</option>
                 </select>
                 <textarea class="span-2 concern-edit-referral-outcome" rows="2" placeholder="Referral outcome (optional)" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.referral_outcome || '')}</textarea>` : ''}
-                <select class="concern-edit-incident-type" data-concern-id="${escapeHtml(c.id)}">
-                  <option value="">Incident type (optional)</option>
-                  <option value="verbal"${c.incident_type === 'verbal' ? ' selected' : ''}>Verbal abuse / aggression</option>
-                  <option value="physical"${c.incident_type === 'physical' ? ' selected' : ''}>Physical aggression</option>
-                  <option value="disruption"${c.incident_type === 'disruption' ? ' selected' : ''}>Persistent disruption</option>
-                  <option value="bullying"${c.incident_type === 'bullying' ? ' selected' : ''}>Bullying</option>
-                  <option value="online"${c.incident_type === 'online' ? ' selected' : ''}>Online / cyberbullying</option>
-                  <option value="damage"${c.incident_type === 'damage' ? ' selected' : ''}>Property damage</option>
-                  <option value="substance"${c.incident_type === 'substance' ? ' selected' : ''}>Substance related</option>
-                  <option value="other"${c.incident_type === 'other' ? ' selected' : ''}>Other</option>
+                <select class="concern-edit-action-taken" data-concern-id="${escapeHtml(c.id)}">
+                  ${actionTakenOptions(c.action_taken || '')}
                 </select>
-                <select class="concern-edit-sanction-type" data-concern-id="${escapeHtml(c.id)}">
-                  <option value="none"${(c.sanction_type || 'none') === 'none' ? ' selected' : ''}>No sanction</option>
-                  <option value="verbal_warning"${c.sanction_type === 'verbal_warning' ? ' selected' : ''}>Verbal warning</option>
-                  <option value="detention"${c.sanction_type === 'detention' ? ' selected' : ''}>Detention</option>
-                  <option value="isolation"${c.sanction_type === 'isolation' ? ' selected' : ''}>Internal isolation</option>
-                  <option value="ftes"${c.sanction_type === 'ftes' ? ' selected' : ''}>Fixed-term exclusion</option>
-                  <option value="managed_move"${c.sanction_type === 'managed_move' ? ' selected' : ''}>Managed move</option>
-                  <option value="permanent_exclusion"${c.sanction_type === 'permanent_exclusion' ? ' selected' : ''}>Permanent exclusion</option>
+                <textarea class="span-2 concern-edit-action-note" rows="2" placeholder="Action notes (optional)" data-concern-id="${escapeHtml(c.id)}">${escapeHtml(c.action_note || '')}</textarea>
+                <select class="concern-edit-incident-type" data-concern-id="${escapeHtml(c.id)}">
+                  ${incidentTypeOptions(c.incident_type || '')}
                 </select>
                 <button class="button concern-edit-save" data-concern-id="${escapeHtml(c.id)}">Save</button>
                 <button class="button secondary concern-edit-cancel" data-concern-id="${escapeHtml(c.id)}">Cancel</button>
@@ -961,6 +934,8 @@
             <div class="concern-card-body">
               ${isEditing ? editFormHtml : `
               <p>${escapeHtml(c.summary || 'No summary.')}</p>
+              ${c.action_taken ? `<p class="muted small"><strong>Action taken:</strong> ${escapeHtml(referenceLabel('concerns', 'action_taken', c.action_taken))}</p>` : ''}
+              ${c.action_note ? `<p class="muted small">${escapeHtml(c.action_note)}</p>` : ''}
               ${c.referral_type && c.referral_type !== 'none' ? `<p class="muted small"><strong>Referral:</strong> ${escapeHtml(c.referral_type.toUpperCase())}</p>` : ''}
               ${c.outcome_summary ? `<p class="muted small"><strong>Outcome:</strong> ${escapeHtml(c.outcome_summary)}</p>` : ''}
               ${c.closed_at ? `<p class="muted small"><strong>Closed:</strong> ${escapeHtml(formatDate(c.closed_at, true))}</p>` : ''}
@@ -1023,7 +998,8 @@
             const referralTypeEl = host.querySelector(`.concern-edit-referral-type[data-concern-id="${id}"]`);
             const referralOutcomeEl = host.querySelector(`.concern-edit-referral-outcome[data-concern-id="${id}"]`);
             const incidentTypeEl = host.querySelector(`.concern-edit-incident-type[data-concern-id="${id}"]`);
-            const sanctionTypeEl = host.querySelector(`.concern-edit-sanction-type[data-concern-id="${id}"]`);
+            const actionTakenEl = host.querySelector(`.concern-edit-action-taken[data-concern-id="${id}"]`);
+            const actionNoteEl = host.querySelector(`.concern-edit-action-note[data-concern-id="${id}"]`);
             postProfile('/api/concerns/' + encodeURIComponent(id) + '/update', {
               title: titleEl ? titleEl.value : '',
               severity: severityEl ? severityEl.value : '',
@@ -1032,7 +1008,8 @@
               referralType: referralTypeEl ? referralTypeEl.value : null,
               referralOutcome: referralOutcomeEl ? referralOutcomeEl.value : null,
               incidentType: incidentTypeEl ? incidentTypeEl.value : null,
-              sanctionType: sanctionTypeEl ? sanctionTypeEl.value : null,
+              actionTaken: actionTakenEl ? actionTakenEl.value : null,
+              actionNote: actionNoteEl ? actionNoteEl.value : null,
             });
           };
         });
@@ -1252,7 +1229,7 @@
     setPageTitle('Settings');
     const target = document.getElementById('settingsPage');
     const tab = state.route.settingsTab || 'users';
-    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['filters', 'Saved Filters'], ['audit', 'Audit Log']];
+    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['dropdowns', 'Dropdowns'], ['filters', 'Saved Filters'], ['audit', 'Audit Log']];
 
     // Build the tab bar shell once — never destroy it so clicks always register.
     if (!target.dataset.built) {
@@ -1285,6 +1262,7 @@
         roles: renderRolesSettings(data),
         teams: renderTeamsSettings(data),
         visibility: renderVisibilitySettings(data),
+        dropdowns: renderDropdownSettings(data),
         filters: renderSavedFiltersSettings(data),
         audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
       };
@@ -1462,6 +1440,38 @@
     return `<article class="panel compact-panel"><h3 class="section-title">Saved Filters</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Name</th><th>Area</th><th>Advanced Filter</th><th>Shared</th></tr></thead><tbody>${(data.savedFilters || []).map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${escapeHtml(friendlyLabel(f.area_key))}</td><td><code>${escapeHtml(f.filter_expression)}</code></td><td>${f.is_shared ? 'Yes' : 'No'}</td></tr>`).join('')}</tbody></table></div></article>`;
   }
 
+  function renderDropdownSettings(data) {
+    const fieldLabels = { incident_type: 'Incident Type', action_taken: 'Action Taken' };
+    const rows = (data.referenceOptions || []).filter((option) => option.area_key === 'concerns').map((option) => `
+      <tr>
+        <td>${escapeHtml(fieldLabels[option.field_key] || friendlyLabel(option.field_key))}</td>
+        <td>${escapeHtml(option.label)}</td>
+        <td><code>${escapeHtml(option.option_key)}</code></td>
+        <td>${escapeHtml(option.sort_order || 0)}</td>
+        <td><span class="badge ${option.is_active ? '' : 'secondary'}">${option.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td>${option.is_system ? '<span class="muted small">System</span>' : `<button class="text-button" data-delete-reference-option data-id="${escapeHtml(option.id)}" data-label="${escapeHtml(option.label)}">Delete</button>`}</td>
+      </tr>`).join('');
+    return `
+      <div class="two-col">
+        <article class="panel compact-panel">
+          <h3 class="section-title">Concern Dropdowns</h3>
+          <div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Dropdown</th><th>Label</th><th>Key</th><th>Order</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+        </article>
+        <article class="panel compact-panel">
+          <h3 class="section-title">Add Option</h3>
+          <div class="form-grid">
+            <select id="referenceField"><option value="incident_type">Incident type</option><option value="action_taken">Action taken</option></select>
+            <select id="referenceActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+            <input id="referenceLabel" class="span-2" placeholder="Label">
+            <input id="referenceKey" placeholder="Optional key">
+            <input id="referenceSortOrder" type="number" value="100" placeholder="Sort">
+            <textarea id="referenceDescription" class="span-2" rows="2" placeholder="Description (optional)"></textarea>
+            <button class="button span-2" id="saveReferenceOptionButton">Save option</button>
+          </div>
+        </article>
+      </div>`;
+  }
+
   function bindSettingsForms() {
     // Add user toggle
     const addUserToggle = document.getElementById('addUserToggle');
@@ -1545,6 +1555,15 @@
         if (!confirm('Delete sharing rule: ' + btn.dataset.label + '?')) return;
         callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: btn.dataset.id } })
           .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'visibility' }); showMessage('Sharing rule deleted.'); });
+      };
+    });
+    const saveReferenceOptionButton = document.getElementById('saveReferenceOptionButton');
+    if (saveReferenceOptionButton) saveReferenceOptionButton.onclick = () => callServer({ path: '/api/settings/reference-options', method: 'post', payload: { areaKey: 'concerns', fieldKey: document.getElementById('referenceField').value, optionKey: document.getElementById('referenceKey').value || document.getElementById('referenceLabel').value, label: document.getElementById('referenceLabel').value, description: document.getElementById('referenceDescription').value, sortOrder: document.getElementById('referenceSortOrder').value, isActive: document.getElementById('referenceActive').value === 'true' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Dropdown option saved.'); });
+    Array.from(document.querySelectorAll('[data-delete-reference-option]')).forEach((btn) => {
+      btn.onclick = () => {
+        if (!confirm('Delete dropdown option: ' + btn.dataset.label + '?')) return;
+        callServer({ path: '/api/settings/reference-options/delete', method: 'post', payload: { referenceOptionId: btn.dataset.id } })
+          .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'dropdowns' }); showMessage('Dropdown option deleted.'); });
       };
     });
   }

@@ -15,6 +15,7 @@
 - chronology records submission, escalation, and resolution milestones
 - concerns owned by the Safeguarding team are automatically confidentiality-gated at creation and update
 - the concern category is retained only as a backend compatibility field and is derived from team ownership
+- incident type and action taken values are settings-managed reference options validated by the Worker
 
 ## Concern Closure (migration 008)
 
@@ -40,3 +41,12 @@ Referral specifics (`referral_outcome`, `referral_date`, `outcome_summary`, `clo
 `external_ref`) are redacted at `summary` visibility and below. Only users with `full` visibility
 see the complete referral narrative. This matches the need-to-know principle for
 multi-agency safeguarding information.
+
+## Behaviour and Action Fields (migration 012)
+
+Concern records retain `incident_type` and gain `action_taken`.
+Both fields are validated server-side against active `reference_options` rows for
+`concerns.incident_type` and `concerns.action_taken`.
+
+The previous sanction model is retired. Migration 012 drops sanction columns, and the
+Worker no longer accepts or validates sanction-specific API fields.

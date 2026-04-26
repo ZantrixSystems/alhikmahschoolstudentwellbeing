@@ -19,6 +19,7 @@
 - chronology_events
 - saved_filters
 - app_settings
+- reference_options   (migration 012)
 - audit_logs
 - send_plans          (migration 008)
 - agency_contacts     (planned — not yet implemented)
@@ -61,3 +62,15 @@ The chronology event type is `external_agency_contact` when an agency is specifi
 
 `chronology_events` gains: `action_taken`, `outcome`, `next_step`,
 `next_step_owner_id`, `next_step_due` — supporting full Ofsted-style evidence narratives.
+
+## Managed Concern Reference Options (migration 012)
+
+`reference_options` stores settings-managed dropdown values for constrained operational fields.
+The initial managed concern fields are:
+
+- `concerns.incident_type`
+- `concerns.action_taken`
+
+The Worker validates submitted concern incident/action values against active rows in
+`reference_options`; these values are no longer hard-coded in the API. Migration 012
+also removes obsolete sanction columns from `concerns`.
