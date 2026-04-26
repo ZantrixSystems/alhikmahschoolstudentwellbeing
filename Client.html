@@ -1689,27 +1689,35 @@
       ((cachedRef && cachedRef.visibilityRules) || []).forEach((r) => {
         ruleMap[r.source_team_id + '|' + r.target_team_id + '|' + r.content_type] = { id: r.id, level: r.visibility_level };
       });
-      const ops = Object.entries(pending).map(([pKey, newLevel]) => {
+      // Run sequentially — google.script.run does not support parallel calls reliably
+      const entries = Object.entries(pending);
+      function runNext(i) {
+        if (i >= entries.length) {
+          state.visibilityEditMode = false;
+          state.visibilityPending = {};
+          bustCache('settings:reference');
+          renderSettingsPage();
+          showMessage('Team sharing saved.');
+          return;
+        }
+        const [pKey, newLevel] = entries[i];
         const [sourceId, targetId, contentType] = pKey.split('|');
         const existing = ruleMap[pKey];
+        const next = () => runNext(i + 1);
+        const fail = (e) => showMessage('Save failed: ' + e.message, 'error');
         if (existing && newLevel === 'none') {
-          return callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } });
+          callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } }).then(next).catch(fail);
         } else if (existing) {
-          // delete then re-create at new level
-          return callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } })
-            .then(() => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }));
+          callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } })
+            .then(() => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }))
+            .then(next).catch(fail);
         } else if (newLevel !== 'none') {
-          return callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } });
+          callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }).then(next).catch(fail);
+        } else {
+          next();
         }
-        return Promise.resolve();
-      });
-      Promise.all(ops).then(() => {
-        state.visibilityEditMode = false;
-        state.visibilityPending = {};
-        bustCache('settings:reference');
-        renderSettingsPage();
-        showMessage('Team sharing saved.');
-      }).catch((e) => showMessage('Save failed: ' + e.message, 'error'));
+      }
+      runNext(0);
     };
     // In edit mode, clicking a level button updates pending state only
     Array.from(document.querySelectorAll('.vis-level-btn')).forEach((btn) => {
