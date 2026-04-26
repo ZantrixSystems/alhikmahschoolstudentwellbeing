@@ -7,6 +7,8 @@
     profileSaving: false,
     profileTab: 'overview',
     dropdownSettingsField: 'incident_type',
+    visibilityEditMode: false,
+    visibilityPending: {},
     directoryCache: null,
     pageCache: {},
   };
@@ -1313,7 +1315,7 @@
         const btn = document.createElement('button');
         btn.dataset.settingsTab = key;
         btn.textContent = label;
-        btn.onclick = () => { state.route.settingsTab = key; renderSettingsPage(); };
+        btn.onclick = () => { state.route.settingsTab = key; state.visibilityEditMode = false; state.visibilityPending = {}; renderSettingsPage(); };
         tabsEl.appendChild(btn);
       });
       target.dataset.built = '1';
@@ -1333,7 +1335,7 @@
         'user-roles': renderUserRolesSettings(data),
         roles: renderRolesSettings(data),
         teams: renderTeamsSettings(data),
-        visibility: renderVisibilitySettings(data),
+        visibility: renderVisibilitySettings(data, state.visibilityEditMode, state.visibilityPending),
         dropdowns: renderDropdownSettings(data),
         filters: renderSavedFiltersSettings(data),
         audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
@@ -1470,7 +1472,7 @@
       </div>`;
   }
 
-  function renderVisibilitySettings(data) {
+  function renderVisibilitySettings(data, editMode, pendingChanges) {
     const CONTENT_TYPES_META = [
       { key: 'concerns', label: 'Cases' },
       { key: 'meetings', label: 'Meetings' },
@@ -1478,36 +1480,48 @@
       { key: 'chronology', label: 'Chronology' },
       { key: 'radar', label: 'Radar' },
     ];
+    const LEVEL_LABELS = { none: '–', summary: 'Title', full: 'Full' };
     const VISIBILITY_LEVELS = ['none', 'summary', 'full'];
     const teams = (data.teams || []).filter((t) => t.is_active !== false);
-    // Build a lookup: "sourceId|targetId|contentType" -> { id, visibilityLevel }
     const ruleMap = {};
     (data.visibilityRules || []).forEach((r) => {
       ruleMap[r.source_team_id + '|' + r.target_team_id + '|' + r.content_type] = { id: r.id, level: r.visibility_level };
     });
+    // pending overrides stored as "srcId|tgtId|ct" -> new level string
+    const pending = pendingChanges || {};
 
     const rows = [];
     teams.forEach((src) => {
-      // Header row for this source team
       rows.push(`<tr style="background:var(--surface-alt,var(--surface))">
         <td colspan="${teams.length + 1}" style="padding:10px 12px 4px">
           <strong>${escapeHtml(src.name)}</strong>
           <span class="muted small" style="margin-left:8px">their data is visible to →</span>
         </td>
       </tr>`);
-      // One row per content type
       CONTENT_TYPES_META.forEach((ct) => {
         const cells = teams.map((tgt) => {
           if (src.id === tgt.id) return `<td style="text-align:center;color:var(--sage);font-size:11px">always</td>`;
-          const rule = ruleMap[src.id + '|' + tgt.id + '|' + ct.key];
-          const current = rule ? rule.level : 'none';
+          const pKey = src.id + '|' + tgt.id + '|' + ct.key;
+          const rule = ruleMap[pKey];
+          const savedLevel = rule ? rule.level : 'none';
+          const displayLevel = pending[pKey] !== undefined ? pending[pKey] : savedLevel;
           const ruleId = rule ? rule.id : '';
+          if (!editMode) {
+            const color = displayLevel === 'full' ? 'var(--sage)' : displayLevel === 'summary' ? '#9b8ecf' : 'var(--text-muted)';
+            return `<td style="text-align:center;padding:4px 6px;font-size:11px;color:${color}">${escapeHtml(LEVEL_LABELS[displayLevel] || '–')}</td>`;
+          }
           const levelBtns = VISIBILITY_LEVELS.map((lv) => {
-            const active = current === lv;
+            const active = displayLevel === lv;
+            const isPending = pending[pKey] !== undefined && pending[pKey] === lv && lv !== savedLevel;
             const color = lv === 'full' ? 'var(--sage)' : lv === 'summary' ? '#9b8ecf' : 'var(--border)';
-            return `<button class="vis-level-btn" data-source-id="${escapeHtml(src.id)}" data-target-id="${escapeHtml(tgt.id)}" data-content-type="${escapeHtml(ct.key)}" data-level="${escapeHtml(lv)}" data-rule-id="${escapeHtml(ruleId)}" data-current="${escapeHtml(current)}"
-              style="padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid ${active ? color : 'var(--border)'};background:${active ? color : 'transparent'};color:${active && lv !== 'none' ? '#fff' : active ? 'var(--text-muted)' : 'var(--text-muted)'};cursor:pointer;margin:1px"
-              title="${escapeHtml(lv)}">${lv === 'none' ? '–' : lv === 'summary' ? 'Title' : 'Full'}</button>`;
+            const borderStyle = isPending ? '2px dashed ' + color : '1px solid ' + (active ? color : 'var(--border)');
+            return `<button class="vis-level-btn"
+              data-pkey="${escapeHtml(pKey)}"
+              data-source-id="${escapeHtml(src.id)}" data-target-id="${escapeHtml(tgt.id)}"
+              data-content-type="${escapeHtml(ct.key)}" data-level="${escapeHtml(lv)}"
+              data-rule-id="${escapeHtml(ruleId)}" data-saved-level="${escapeHtml(savedLevel)}"
+              style="padding:2px 6px;font-size:10px;border-radius:4px;border:${borderStyle};background:${active ? color : 'transparent'};color:${active && lv !== 'none' ? '#fff' : 'var(--text-muted)'};cursor:pointer;margin:1px"
+              title="${escapeHtml(lv)}">${escapeHtml(LEVEL_LABELS[lv])}</button>`;
           }).join('');
           return `<td style="text-align:center;padding:3px 6px">${levelBtns}</td>`;
         }).join('');
@@ -1519,13 +1533,22 @@
     });
 
     const headerCells = teams.map((t) => `<th style="text-align:center;min-width:110px;font-size:12px">${escapeHtml(t.name)}</th>`).join('');
+    const pendingCount = Object.keys(pending).length;
+    const actionBar = editMode
+      ? `<div style="display:flex;gap:8px;align-items:center">
+           ${pendingCount > 0 ? `<span class="muted small">${pendingCount} unsaved change${pendingCount !== 1 ? 's' : ''}</span>` : ''}
+           <button class="button" id="visibilitySaveBtn">Save changes</button>
+           <button class="button secondary" id="visibilityCancelBtn">Cancel</button>
+         </div>`
+      : `<button class="button secondary" id="visibilityEditBtn">Edit</button>`;
     return `
       <article class="panel compact-panel">
         <div class="panel-header">
           <div>
             <h3 class="section-title">Team Sharing</h3>
-            <p class="muted small">For each content type: <strong>–</strong> = hidden, <strong>Title</strong> = see title/summary only, <strong>Full</strong> = see everything.</p>
+            <p class="muted small">${editMode ? 'Select a level for each content type. Changes are not saved until you click <strong>Save changes</strong>.' : 'Read-only. Click <strong>Edit</strong> to make changes.'}</p>
           </div>
+          ${actionBar}
         </div>
         <div class="table-scroll">
           <table class="data-table dense-table">
@@ -1639,26 +1662,64 @@
     if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { bustCache('settings:reference'); showMessage('Role saved.'); });
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
-    const CONTENT_TYPES = ['concerns', 'meetings', 'actions', 'chronology', 'radar'];
+    // Visibility matrix — Edit/Save/Cancel
+    const visibilityEditBtn = document.getElementById('visibilityEditBtn');
+    if (visibilityEditBtn) visibilityEditBtn.onclick = () => {
+      state.visibilityEditMode = true;
+      state.visibilityPending = {};
+      renderSettingsPage();
+    };
+    const visibilityCancelBtn = document.getElementById('visibilityCancelBtn');
+    if (visibilityCancelBtn) visibilityCancelBtn.onclick = () => {
+      state.visibilityEditMode = false;
+      state.visibilityPending = {};
+      renderSettingsPage();
+    };
+    const visibilitySaveBtn = document.getElementById('visibilitySaveBtn');
+    if (visibilitySaveBtn) visibilitySaveBtn.onclick = () => {
+      const pending = state.visibilityPending;
+      const cachedRef = getCached('settings:reference');
+      const ruleMap = {};
+      ((cachedRef && cachedRef.visibilityRules) || []).forEach((r) => {
+        ruleMap[r.source_team_id + '|' + r.target_team_id + '|' + r.content_type] = { id: r.id, level: r.visibility_level };
+      });
+      const ops = Object.entries(pending).map(([pKey, newLevel]) => {
+        const [sourceId, targetId, contentType] = pKey.split('|');
+        const existing = ruleMap[pKey];
+        if (existing && newLevel === 'none') {
+          return callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } });
+        } else if (existing) {
+          // delete then re-create at new level
+          return callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: existing.id } })
+            .then(() => callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } }));
+        } else if (newLevel !== 'none') {
+          return callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: newLevel } });
+        }
+        return Promise.resolve();
+      });
+      Promise.all(ops).then(() => {
+        state.visibilityEditMode = false;
+        state.visibilityPending = {};
+        bustCache('settings:reference');
+        renderSettingsPage();
+        showMessage('Team sharing saved.');
+      }).catch((e) => showMessage('Save failed: ' + e.message, 'error'));
+    };
+    // In edit mode, clicking a level button updates pending state only
     Array.from(document.querySelectorAll('.vis-level-btn')).forEach((btn) => {
       btn.onclick = () => {
-        const { sourceId, targetId, contentType, level, ruleId, current } = btn.dataset;
-        if (level === current) return; // already at this level — no-op
-        const doSave = (afterDelete) => {
-          if (level === 'none') {
-            // Just deleted, nothing to add
-            bustCache('settings:reference');
-            renderSettingsPage();
-          } else {
-            callServer({ path: '/api/settings/visibility-rules', method: 'post', payload: { sourceTeamId: sourceId, targetTeamId: targetId, contentType, visibilityLevel: level } })
-              .then(() => { bustCache('settings:reference'); renderSettingsPage(); });
-          }
-        };
-        if (ruleId) {
-          callServer({ path: '/api/settings/visibility-rules/delete', method: 'post', payload: { visibilityRuleId: ruleId } })
-            .then(doSave);
+        const { pkey, level, savedLevel } = btn.dataset;
+        if (level === savedLevel) {
+          delete state.visibilityPending[pkey]; // revert to saved
         } else {
-          doSave();
+          state.visibilityPending[pkey] = level;
+        }
+        // Re-render just the matrix body without a server call
+        const cachedRef = getCached('settings:reference');
+        if (cachedRef) {
+          const newHtml = renderVisibilitySettings(cachedRef, true, state.visibilityPending);
+          const body = document.getElementById('settingsBody');
+          if (body) { body.outerHTML = '<div id="settingsBody">' + newHtml + '</div>'; bindSettingsForms(); }
         }
       };
     });
