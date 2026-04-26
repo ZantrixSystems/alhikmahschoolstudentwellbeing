@@ -109,3 +109,23 @@ function apiProxy(request) {
 function getBootstrapData() {
   return apiProxy({ path: '/api/bootstrap', method: 'get' });
 }
+
+function getStudentDirectory() {
+  const SHEET_ID = '1inxC2soNCk3bitKNXAubBXTBbs0ZgG8cBIwNY6XM3Z4';
+  try {
+    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+    const rows = sheet.getDataRange().getValues();
+    const students = [];
+    for (let i = 1; i < rows.length; i++) {
+      const id = String(rows[i][0] || '').trim();
+      const firstName = String(rows[i][1] || '').trim();
+      const lastName = String(rows[i][2] || '').trim();
+      if (id && (firstName || lastName)) {
+        students.push({ studentCode: id, firstName: firstName, lastName: lastName });
+      }
+    }
+    return { students: students };
+  } catch (e) {
+    return { students: [], error: e.message };
+  }
+}

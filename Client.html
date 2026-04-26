@@ -7,6 +7,7 @@
     profileSaving: false,
     profileTab: 'overview',
     dropdownSettingsField: 'incident_type',
+    directoryCache: null,
     pageCache: {},
   };
 
@@ -321,19 +322,15 @@
               <button class="button ${!isAdvanced ? '' : 'secondary'}" id="builderModeButton">Builder</button>
               <button class="button ${isAdvanced ? '' : 'secondary'}" id="advancedModeButton">Advanced</button>
             </div>
-            ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">New student</button>' : ''}
+            ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">Add student</button>' : ''}
           </div>
         </div>
         <div id="newStudentForm" class="inline-form hidden">
-          <div class="form-grid">
-            <input id="newFirstName" placeholder="First name">
-            <input id="newLastName" placeholder="Last name">
-            <input id="newPreferredName" placeholder="Preferred name">
-            <input id="newStudentCode" placeholder="Student code">
-            <input id="newYearGroup" placeholder="Year group">
-            <input id="newTutorGroup" placeholder="Class / tutor group">
-            <button class="button span-2" id="createStudentButton">Create student</button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="directorySearch" placeholder="Search by name or ID..." style="flex:1;min-width:200px" autocomplete="off">
+            <button class="button secondary" id="cancelNewStudent">Cancel</button>
           </div>
+          <div id="directoryResults" style="margin-top:6px"></div>
         </div>
         <div class="student-filter-shell">
         <div id="builderFilters" class="filter-builder ${isAdvanced ? 'hidden' : ''}">
@@ -368,7 +365,62 @@
     `;
 
     const toggle = document.getElementById('newStudentToggle');
-    if (toggle) toggle.onclick = () => document.getElementById('newStudentForm').classList.toggle('hidden');
+    const newStudentForm = document.getElementById('newStudentForm');
+    if (toggle) toggle.onclick = () => {
+      newStudentForm.classList.remove('hidden');
+      toggle.classList.add('hidden');
+      const dirSearch = document.getElementById('directorySearch');
+      if (dirSearch) dirSearch.focus();
+      // Load directory on first open
+      if (!state.directoryCache) {
+        document.getElementById('directoryResults').innerHTML = '<p class="muted small">Loading directory...</p>';
+        google.script.run
+          .withSuccessHandler((result) => {
+            state.directoryCache = result.students || [];
+            if (result.error) showMessage('Directory: ' + result.error, 'error');
+          })
+          .withFailureHandler(() => showMessage('Could not load student directory.', 'error'))
+          .getStudentDirectory();
+      }
+    };
+    const cancelNewStudent = document.getElementById('cancelNewStudent');
+    if (cancelNewStudent) cancelNewStudent.onclick = () => {
+      newStudentForm.classList.add('hidden');
+      if (toggle) toggle.classList.remove('hidden');
+      document.getElementById('directoryResults').innerHTML = '';
+      document.getElementById('directorySearch').value = '';
+    };
+    const dirSearch = document.getElementById('directorySearch');
+    if (dirSearch) dirSearch.oninput = () => {
+      const q = dirSearch.value.trim().toLowerCase();
+      const results = document.getElementById('directoryResults');
+      if (!q) { results.innerHTML = ''; return; }
+      const dir = state.directoryCache || [];
+      if (!dir.length) { results.innerHTML = '<p class="muted small">Directory still loading...</p>'; return; }
+      const matches = dir.filter((s) =>
+        (s.firstName + ' ' + s.lastName).toLowerCase().includes(q) || s.studentCode.toLowerCase().includes(q)
+      ).slice(0, 10);
+      if (!matches.length) { results.innerHTML = '<p class="muted small">No matches in directory.</p>'; return; }
+      results.innerHTML = matches.map((s) => `
+        <div class="directory-result" data-student-code="${escapeHtml(s.studentCode)}" data-first="${escapeHtml(s.firstName)}" data-last="${escapeHtml(s.lastName)}"
+          style="padding:6px 10px;cursor:pointer;border-radius:4px;display:flex;justify-content:space-between;align-items:center">
+          <span><strong>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</strong> <span class="muted small">${escapeHtml(s.studentCode)}</span></span>
+          <button class="button" style="font-size:12px;padding:2px 10px">Add</button>
+        </div>`).join('');
+      results.querySelectorAll('.directory-result').forEach((row) => {
+        row.onclick = () => {
+          const code = row.dataset.studentCode;
+          const first = row.dataset.first;
+          const last = row.dataset.last;
+          callServer({ path: '/api/students', method: 'post', payload: { studentCode: code, firstName: first, lastName: last } })
+            .then((result) => {
+              newStudentForm.classList.add('hidden');
+              if (toggle) toggle.classList.remove('hidden');
+              updateRoute({ page: 'student-profile', studentId: result.student.id });
+            });
+        };
+      });
+    };
     document.getElementById('builderModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'builder' });
     document.getElementById('advancedModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'advanced' });
     document.getElementById('applyBuilderFilter').onclick = () => {
@@ -398,26 +450,6 @@
     if (builderSaved) builderSaved.onchange = (event) => {
       if (event.target.value) updateRoute({ page: 'students', filter: event.target.value, filterMode: 'builder' });
     };
-    const createButton = document.getElementById('createStudentButton');
-    if (createButton) {
-      createButton.onclick = () => {
-        callServer({
-          path: '/api/students',
-          method: 'post',
-          payload: {
-            firstName: document.getElementById('newFirstName').value,
-            lastName: document.getElementById('newLastName').value,
-            preferredName: document.getElementById('newPreferredName').value,
-            studentCode: document.getElementById('newStudentCode').value,
-            yearGroup: document.getElementById('newYearGroup').value,
-            tutorGroup: document.getElementById('newTutorGroup').value,
-          },
-        }).then((result) => {
-          showMessage('Student created.');
-          updateRoute({ page: 'student-profile', studentId: result.student.id });
-        });
-      };
-    }
 
     const studentCacheKey = 'students:' + (state.route.q || '') + ':' + (state.route.filter || '');
     const cachedStudents = getCached(studentCacheKey);

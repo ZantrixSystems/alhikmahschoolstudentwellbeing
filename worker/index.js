@@ -746,6 +746,9 @@ function createApi(env, actorEmail) {
     await assertPermission(auth, 'students.manage');
     if (!body.firstName || !body.lastName) throw new AppError('firstName and lastName are required');
     const code = body.studentCode || 'STU-' + Date.now();
+    // If student already exists by student_code, return their existing record
+    const existing = await queryOne('SELECT * FROM students WHERE student_code = $1 AND deleted_at IS NULL', [code]);
+    if (existing) return { student: existing };
     const student = await queryOne(
       [
         'INSERT INTO students (student_code, first_name, last_name, preferred_name, year_group, tutor_group, current_status, created_by, updated_by)',
