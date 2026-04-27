@@ -528,7 +528,9 @@
   function actionTakenOptions(selected) { return buildReferenceOptions('concerns', 'action_taken', selected || ''); }
 
   function profileActionForm(action, data) {
-    const teams = (state.bootstrap.teams || []).map((team) => `<option value="${team.id}">${escapeHtml(team.name)}</option>`).join('');
+    const teamCheckboxes = (prefix) => (state.bootstrap.teams || []).map((team) =>
+      `<label class="check-control team-check"><input type="checkbox" class="${prefix}-team-cb" value="${escapeHtml(team.id)}"> ${escapeHtml(team.name)}</label>`
+    ).join('');
     const studentId = state.route.studentId;
     const forms = {
       note: (() => {
@@ -542,7 +544,7 @@
         <div class="form-grid">
           <input id="noteSummary" class="span-2" placeholder="Short note summary">
           <textarea id="noteBody" class="span-2" rows="3" placeholder="Support note"></textarea>
-          <select id="noteTeam"><option value="">All teams (everyone)</option>${teams}</select>
+          <div class="span-2 team-picker"><span class="team-picker-label">Visible to</span>${teamCheckboxes('note')}</div>
           ${concernLinkSelect}
           <button class="button" id="submitNote">Add note</button>
         </div>`;
@@ -552,7 +554,7 @@
           <input id="meetingTitle" placeholder="Meeting title">
           <input id="meetingOccurredAt" type="datetime-local" value="${new Date().toISOString().slice(0,16)}">
           <select id="meetingType"><option value="student_check_in">Student check-in</option><option value="parent_contact">Parent contact</option><option value="review_meeting">Review meeting</option><option value="external_agency">External agency</option><option value="team_around_family">Team around family</option></select>
-          <select id="meetingTeam"><option value="">All teams (everyone)</option>${teams}</select>
+          <div class="span-2 team-picker"><span class="team-picker-label">Visible to</span>${teamCheckboxes('meeting')}</div>
           <textarea id="meetingSummary" class="span-2" rows="3" placeholder="Shareable summary"></textarea>
           <div class="span-2" id="meetingExternalFields" style="display:none">
             <div class="form-grid">
@@ -578,7 +580,7 @@
         return `
         <div class="form-grid">
           <input id="concernTitle" class="span-2" placeholder="Case title">
-          <select id="concernTeam"><option value="">All teams (everyone)</option>${teams}</select>
+          <div class="span-2 team-picker"><span class="team-picker-label">Visible to</span>${teamCheckboxes('concern')}</div>
           <select id="concernSeverity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
           <textarea id="concernSummary" class="span-2" rows="3" placeholder="Brief summary of the concern"></textarea>
           <div class="span-2" id="concernSafeguardingFields" style="display:none" data-safeguarding-team-id="${escapeHtml(safeguardingTeamId)}">
@@ -625,7 +627,7 @@
           <input id="followDueAt" type="date" value="${new Date().toISOString().slice(0,10)}">
           <select id="followStatus"><option value="open">Open</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
           <select id="followPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
-          <select id="followTeam"><option value="">All teams (everyone)</option>${teams}</select>
+          <div class="span-2 team-picker"><span class="team-picker-label">Visible to</span>${teamCheckboxes('follow')}</div>
           <select id="followVisibility"><option value="summary">Summary</option><option value="indicator">Indicator only</option><option value="full">Full detail</option></select>
           ${concernLinkSelect}
           <textarea id="followSummary" class="span-2" rows="3" placeholder="What needs to happen?"></textarea>
@@ -675,12 +677,14 @@
   }
 
   function bindProfileActionHandlers() {
+    const checkedTeamIds = (prefix) => Array.from(document.querySelectorAll(`.${prefix}-team-cb:checked`)).map((cb) => cb.value);
+
     const submitNote = document.getElementById('submitNote');
     if (submitNote) submitNote.onclick = () => postProfile('/api/notes', {
       studentId: state.route.studentId,
       summary: document.getElementById('noteSummary').value,
       body: document.getElementById('noteBody').value,
-      teamId: document.getElementById('noteTeam').value,
+      teamIds: checkedTeamIds('note'),
       concernId: document.getElementById('noteConcernId')?.value || null,
     });
     const meetingType = document.getElementById('meetingType');
@@ -701,20 +705,20 @@
         interactionType: document.getElementById('meetingType').value,
         summary: document.getElementById('meetingSummary').value,
         occurredAt: document.getElementById('meetingOccurredAt').value || new Date().toISOString(),
-        teamId: document.getElementById('meetingTeam').value,
+        teamIds: checkedTeamIds('meeting'),
         externalAgency: extAgency ? extAgency.value : '',
         externalContactName: document.getElementById('meetingExternalContact') ? document.getElementById('meetingExternalContact').value : '',
         externalRef: document.getElementById('meetingExternalRef') ? document.getElementById('meetingExternalRef').value : '',
       });
     };
-    const concernTeam = document.getElementById('concernTeam');
     const concernSafeguardingFields = document.getElementById('concernSafeguardingFields');
-    if (concernTeam) {
+    if (concernSafeguardingFields) {
+      const safeguardingTeamId = concernSafeguardingFields.dataset.safeguardingTeamId;
       const toggleConcernFields = () => {
-        const safeguardingTeamId = concernSafeguardingFields ? concernSafeguardingFields.dataset.safeguardingTeamId : '';
-        if (concernSafeguardingFields) concernSafeguardingFields.style.display = concernTeam.value === safeguardingTeamId ? '' : 'none';
+        const checked = checkedTeamIds('concern');
+        concernSafeguardingFields.style.display = safeguardingTeamId && checked.includes(safeguardingTeamId) ? '' : 'none';
       };
-      concernTeam.onchange = toggleConcernFields;
+      document.querySelectorAll('.concern-team-cb').forEach((cb) => { cb.onchange = toggleConcernFields; });
       toggleConcernFields();
     }
     const submitConcern = document.getElementById('submitConcern');
@@ -723,7 +727,7 @@
       title: document.getElementById('concernTitle').value,
       severity: document.getElementById('concernSeverity').value,
       summary: document.getElementById('concernSummary').value,
-      teamId: document.getElementById('concernTeam').value,
+      teamIds: checkedTeamIds('concern'),
       referralType: document.getElementById('concernReferralType') ? document.getElementById('concernReferralType').value : null,
       referralDate: document.getElementById('concernReferralDate') ? document.getElementById('concernReferralDate').value : null,
       referralOutcome: document.getElementById('concernReferralOutcome') ? document.getElementById('concernReferralOutcome').value : null,
@@ -741,7 +745,7 @@
       status: document.getElementById('followStatus').value,
       visibilityLevel: document.getElementById('followVisibility').value,
       dueAt: document.getElementById('followDueAt').value,
-      teamId: document.getElementById('followTeam').value,
+      teamIds: checkedTeamIds('follow'),
       concernId: document.getElementById('followConcernId') ? document.getElementById('followConcernId').value || null : null,
     });
     const submitRadar = document.getElementById('submitRadar');

@@ -517,13 +517,22 @@ function createApi(env, actorEmail) {
     return VISIBILITY_LEVELS[Math.max(VISIBILITY_LEVELS.indexOf(left), VISIBILITY_LEVELS.indexOf(right))];
   }
 
-  function computeVisibility(auth, matrix, ownerTeamId, contentType, recordVisibilityLevel) {
-    if (auth.isAdmin || !ownerTeamId) return 'full';
-    if (auth.teamIds.includes(ownerTeamId)) return 'full';
+  function computeVisibility(auth, matrix, ownerTeamIds, contentType, recordVisibilityLevel) {
+    // ownerTeamIds may be a single id (string/null) or an array — normalise to array
+    const teamIds = Array.isArray(ownerTeamIds)
+      ? ownerTeamIds.filter(Boolean)
+      : ownerTeamIds ? [ownerTeamIds] : [];
+    if (auth.isAdmin || !teamIds.length) return 'full';
+    // If the viewer belongs to any owning team, they get full access
+    if (teamIds.some((id) => auth.teamIds.includes(id))) return 'full';
     const recordLevel = normaliseVisibilityLevel(recordVisibilityLevel);
-    const granted = matrix
-      .filter((rule) => rule.target_team_id === ownerTeamId && rule.content_type === contentType)
-      .reduce((highest, rule) => maxVisibility(highest, rule.visibility_level), 'none');
+    // Best grant across all owning teams
+    const granted = teamIds.reduce((best, ownerTeamId) => {
+      const teamGrant = matrix
+        .filter((rule) => rule.target_team_id === ownerTeamId && rule.content_type === contentType)
+        .reduce((highest, rule) => maxVisibility(highest, rule.visibility_level), 'none');
+      return maxVisibility(best, teamGrant);
+    }, 'none');
     return VISIBILITY_LEVELS[Math.min(
       VISIBILITY_LEVELS.indexOf(granted),
       VISIBILITY_LEVELS.indexOf(recordLevel)
@@ -581,7 +590,7 @@ function createApi(env, actorEmail) {
 
   function applyVisibility(auth, matrix, records, contentType, visibilityField) {
     return (records || [])
-      .map((record) => redactRecord(record, computeVisibility(auth, matrix, record.team_id, contentType, record[visibilityField] || 'full')))
+      .map((record) => redactRecord(record, computeVisibility(auth, matrix, record.team_ids || record.team_id, contentType, record[visibilityField] || 'full')))
       .filter(Boolean);
   }
 
@@ -589,7 +598,7 @@ function createApi(env, actorEmail) {
     return (records || [])
       .map((record) => {
         const contentType = record.item_type === 'follow_up' ? 'actions' : 'meetings';
-        return redactRecord(record, computeVisibility(auth, matrix, record.team_id, contentType, record.visibility_level || 'summary'));
+        return redactRecord(record, computeVisibility(auth, matrix, record.team_ids || record.team_id, contentType, record.visibility_level || 'summary'));
       })
       .filter(Boolean);
   }
@@ -821,32 +830,67 @@ function createApi(env, actorEmail) {
     const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw, activeSendPlan] = await Promise.all([
       canReviewConcerns ? query(
         [
-          'SELECT c.id, c.team_id, t.name AS team_name, t.team_key AS team_key, c.title, c.summary, c.detail,',
+          'SELECT c.id, c.title, c.summary, c.detail,',
           '  c.status, c.category, c.severity, c.urgency, c.confidentiality_level,',
           '  c.outcome_summary, c.referral_type, c.referral_date, c.referral_outcome,',
           '  c.incident_type, c.action_taken, c.behaviour_plan_active,',
           '  c.closed_at, c.created_at, c.created_at AS occurred_at,',
-          '  closed_by.display_name AS closed_by_name',
+          '  closed_by.display_name AS closed_by_name,',
+          '  COALESCE(ARRAY_AGG(DISTINCT ct.team_id) FILTER (WHERE ct.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.team_key) FILTER (WHERE t.team_key IS NOT NULL), ARRAY[]::text[]) AS team_keys',
           'FROM concerns c',
-          'LEFT JOIN teams t ON t.id = c.team_id',
+          'LEFT JOIN concern_teams ct ON ct.concern_id = c.id',
+          'LEFT JOIN teams t ON t.id = ct.team_id',
           'LEFT JOIN users closed_by ON closed_by.id = c.closed_by_user_id',
           'WHERE c.student_id = $1 AND c.deleted_at IS NULL',
+          'GROUP BY c.id, closed_by.display_name',
           'ORDER BY c.created_at DESC',
         ].join('\n'), [studentId]) : [],
       canViewMeetings ? query(
         [
-          'SELECT m.id, m.team_id, t.name AS team_name, m.title, m.summary, m.detail,',
+          'SELECT m.id, m.title, m.summary, m.detail,',
           '  m.interaction_type, m.visibility_level, m.occurred_at, m.created_at,',
           '  m.occurred_at AS calendar_at, m.external_agency, m.external_contact_name, m.external_ref,',
-          '  u.display_name AS assigned_user_name',
+          '  u.display_name AS assigned_user_name,',
+          '  COALESCE(ARRAY_AGG(DISTINCT mt.team_id) FILTER (WHERE mt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
           'FROM meetings m',
-          'LEFT JOIN teams t ON t.id = m.team_id',
+          'LEFT JOIN meeting_teams mt ON mt.meeting_id = m.id',
+          'LEFT JOIN teams t ON t.id = mt.team_id',
           'LEFT JOIN users u ON u.id = m.logged_by_user_id',
           'WHERE m.student_id = $1 AND m.deleted_at IS NULL',
+          'GROUP BY m.id, u.display_name',
           'ORDER BY m.occurred_at DESC',
         ].join('\n'), [studentId]) : [],
-      canManageActions ? query('SELECT a.id, a.team_id, t.name AS team_name, a.title, a.summary, a.status, a.priority, a.due_at, a.completed_at, a.created_at, COALESCE(a.due_at, a.created_at) AS occurred_at, a.due_at AS calendar_at, COALESCE(a.visibility_level, \'summary\') AS visibility_level, u.display_name AS assigned_user_name FROM actions a LEFT JOIN teams t ON t.id = a.team_id LEFT JOIN users u ON u.id = a.owner_user_id WHERE a.student_id = $1 AND a.deleted_at IS NULL ORDER BY COALESCE(a.due_at, a.created_at) DESC', [studentId]) : [],
-      canViewNotes ? query('SELECT n.id, n.team_id, t.name AS team_name, n.summary AS title, n.summary, n.body, n.note_type, n.visibility_level, n.created_at, n.created_at AS occurred_at FROM notes n LEFT JOIN teams t ON t.id = n.team_id WHERE n.student_id = $1 AND n.deleted_at IS NULL ORDER BY n.created_at DESC', [studentId]) : [],
+      canManageActions ? query(
+        [
+          'SELECT a.id, a.title, a.summary, a.status, a.priority, a.due_at, a.completed_at, a.created_at,',
+          '  COALESCE(a.due_at, a.created_at) AS occurred_at, a.due_at AS calendar_at,',
+          "  COALESCE(a.visibility_level, 'summary') AS visibility_level,",
+          '  u.display_name AS assigned_user_name,',
+          '  COALESCE(ARRAY_AGG(DISTINCT at2.team_id) FILTER (WHERE at2.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+          'FROM actions a',
+          'LEFT JOIN action_teams at2 ON at2.action_id = a.id',
+          'LEFT JOIN teams t ON t.id = at2.team_id',
+          'LEFT JOIN users u ON u.id = a.owner_user_id',
+          'WHERE a.student_id = $1 AND a.deleted_at IS NULL',
+          'GROUP BY a.id, u.display_name',
+          'ORDER BY COALESCE(a.due_at, a.created_at) DESC',
+        ].join('\n'), [studentId]) : [],
+      canViewNotes ? query(
+        [
+          'SELECT n.id, n.summary AS title, n.summary, n.body, n.note_type, n.visibility_level, n.created_at, n.created_at AS occurred_at,',
+          '  COALESCE(ARRAY_AGG(DISTINCT nt.team_id) FILTER (WHERE nt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+          'FROM notes n',
+          'LEFT JOIN note_teams nt ON nt.note_id = n.id',
+          'LEFT JOIN teams t ON t.id = nt.team_id',
+          'WHERE n.student_id = $1 AND n.deleted_at IS NULL',
+          'GROUP BY n.id',
+          'ORDER BY n.created_at DESC',
+        ].join('\n'), [studentId]) : [],
       canViewChronology ? query(
         [
           'SELECT ce.id, ce.source_table, ce.source_id, ce.team_id, t.name AS team_name,',
@@ -872,13 +916,33 @@ function createApi(env, actorEmail) {
     ]);
     // Attach linked follow-ups (actions with concern_id) to each concern
     const linkedActions = canManageActions ? await query(
-      'SELECT a.id, a.concern_id, a.title, a.summary, a.status, a.priority, a.due_at, a.created_at, t.name AS team_name FROM actions a LEFT JOIN teams t ON t.id = a.team_id WHERE a.student_id = $1 AND a.concern_id IS NOT NULL AND a.deleted_at IS NULL ORDER BY a.created_at DESC',
+      [
+        'SELECT a.id, a.concern_id, a.title, a.summary, a.status, a.priority, a.due_at, a.created_at,',
+        '  COALESCE(ARRAY_AGG(DISTINCT at2.team_id) FILTER (WHERE at2.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+        '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+        'FROM actions a',
+        'LEFT JOIN action_teams at2 ON at2.action_id = a.id',
+        'LEFT JOIN teams t ON t.id = at2.team_id',
+        'WHERE a.student_id = $1 AND a.concern_id IS NOT NULL AND a.deleted_at IS NULL',
+        'GROUP BY a.id',
+        'ORDER BY a.created_at DESC',
+      ].join('\n'),
       [studentId]
     ) : [];
     concernsRaw.forEach(c => { c.linkedFollowUps = linkedActions.filter(a => a.concern_id === c.id); });
 
     const linkedNotes = canViewNotes ? await query(
-      'SELECT n.id, n.concern_id, n.summary AS title, n.summary, n.body, n.created_at, t.name AS team_name FROM notes n LEFT JOIN teams t ON t.id = n.team_id WHERE n.student_id = $1 AND n.concern_id IS NOT NULL AND n.deleted_at IS NULL ORDER BY n.created_at DESC',
+      [
+        'SELECT n.id, n.concern_id, n.summary AS title, n.summary, n.body, n.created_at,',
+        '  COALESCE(ARRAY_AGG(DISTINCT nt.team_id) FILTER (WHERE nt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+        '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+        'FROM notes n',
+        'LEFT JOIN note_teams nt ON nt.note_id = n.id',
+        'LEFT JOIN teams t ON t.id = nt.team_id',
+        'WHERE n.student_id = $1 AND n.concern_id IS NOT NULL AND n.deleted_at IS NULL',
+        'GROUP BY n.id',
+        'ORDER BY n.created_at DESC',
+      ].join('\n'),
       [studentId]
     ) : [];
     concernsRaw.forEach(c => { c.linkedNotes = linkedNotes.filter(n => n.concern_id === c.id); });
@@ -886,13 +950,15 @@ function createApi(env, actorEmail) {
     // Derive radar badges from open concerns (does not replace the radar table query)
     const derivedRadar = {};
     (concernsRaw || [])
-      .filter(c => ['open', 'triage', 'escalated'].includes(c.status) && c.team_id)
+      .filter(c => ['open', 'triage', 'escalated'].includes(c.status) && c.team_ids && c.team_ids.length)
       .forEach(c => {
-        if (!derivedRadar[c.team_id]) {
-          derivedRadar[c.team_id] = { team_id: c.team_id, team_name: c.team_name, team_key: c.team_key || null, status: 'active', severity: c.severity };
-        } else if (['high', 'medium', 'low'].indexOf(c.severity) < ['high', 'medium', 'low'].indexOf(derivedRadar[c.team_id].severity)) {
-          derivedRadar[c.team_id].severity = c.severity;
-        }
+        c.team_ids.forEach((tid, i) => {
+          if (!derivedRadar[tid]) {
+            derivedRadar[tid] = { team_id: tid, team_name: (c.team_names || [])[i] || null, team_key: (c.team_keys || [])[i] || null, status: 'active', severity: c.severity };
+          } else if (['high', 'medium', 'low'].indexOf(c.severity) < ['high', 'medium', 'low'].indexOf(derivedRadar[tid].severity)) {
+            derivedRadar[tid].severity = c.severity;
+          }
+        });
       });
 
     await writeAuditLog(auth, { areaKey: 'students', actionKey: 'profile.view', entityType: 'student', entityId: studentId, studentId, metadata: { sensitiveRead: true } });
@@ -918,11 +984,12 @@ function createApi(env, actorEmail) {
     }
     const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType || null);
     const actionTaken = await assertReferenceOption('concerns', 'action_taken', body.actionTaken || body.action_taken || null);
-    // Derive confidentiality from the team's key: safeguarding team = safeguarding confidentiality.
+    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
+    // Derive confidentiality from teams: if any selected team is safeguarding, apply safeguarding level.
     let isSafeguarding = false;
-    if (body.teamId) {
-      const teamRow = await queryOne('SELECT team_key FROM teams WHERE id = $1', [body.teamId]);
-      isSafeguarding = teamRow && teamRow.team_key === 'safeguarding';
+    if (teamIds.length) {
+      const teamRows = await query('SELECT team_key FROM teams WHERE id = ANY($1::uuid[])', [teamIds]);
+      isSafeguarding = teamRows.some((r) => r.team_key === 'safeguarding');
     }
     const requestedConfidentiality = body.confidentialityLevel || 'summary';
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
@@ -930,22 +997,28 @@ function createApi(env, actorEmail) {
     const concern = await queryOne(
       [
         'INSERT INTO concerns',
-        '  (student_id, concern_ref, team_id, submitted_by_user_id, category, severity, urgency,',
+        '  (student_id, concern_ref, submitted_by_user_id, category, severity, urgency,',
         '   confidentiality_level, title, summary, detail, referral_type, referral_date, referral_outcome,',
         '   incident_type, action_taken, action_note, behaviour_plan_active,',
         '   created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $4, $4) RETURNING *',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $3, $3) RETURNING *',
       ].join('\n'),
       [
-        body.studentId, 'CON-' + Date.now(), body.teamId || null, auth.userId,
+        body.studentId, 'CON-' + Date.now(), auth.userId,
         derivedCategory, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
         body.title, body.summary, body.detail || null,
         referralType, body.referralDate || null, body.referralOutcome || null,
         incidentType, actionTaken, body.actionNote || null, body.behaviourPlanActive === true,
       ]
     );
-    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', body.teamId, body.title, body.summary, body.detail, 'summary', null, actionTaken, null, null, null);
-    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { severity: body.severity, teamId: body.teamId } });
+    if (teamIds.length) {
+      await query(
+        'INSERT INTO concern_teams (concern_id, team_id) SELECT $1, UNNEST($2::uuid[]) ON CONFLICT DO NOTHING',
+        [concern.id, teamIds]
+      );
+    }
+    await addChronology(auth, body.studentId, 'concerns', concern.id, 'concern_logged', teamIds[0] || null, body.title, body.summary, body.detail, 'summary', null, actionTaken, null, null, null);
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'create', entityType: 'concern', entityId: concern.id, studentId: body.studentId, metadata: { severity: body.severity, teamIds } });
     return { concern };
   }
 
@@ -1004,11 +1077,20 @@ function createApi(env, actorEmail) {
     const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : existing.incident_type);
     const submittedActionTaken = body.actionTaken !== undefined ? body.actionTaken : body.action_taken;
     const actionTaken = await assertReferenceOption('concerns', 'action_taken', submittedActionTaken !== undefined ? submittedActionTaken : existing.action_taken);
-    const teamId = body.teamId !== undefined ? (body.teamId || null) : existing.team_id;
+    // Resolve new team list: if body provides teamIds/teamId use that, otherwise keep existing
+    let teamIds;
+    if (body.teamIds !== undefined) {
+      teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamIds ? [body.teamIds] : []);
+    } else if (body.teamId !== undefined) {
+      teamIds = body.teamId ? [body.teamId] : [];
+    } else {
+      const existingTeams = await query('SELECT team_id FROM concern_teams WHERE concern_id = $1', [concernId]);
+      teamIds = existingTeams.map((r) => r.team_id);
+    }
     let isSafeguarding = false;
-    if (teamId) {
-      const teamRow = await queryOne('SELECT team_key FROM teams WHERE id = $1', [teamId]);
-      isSafeguarding = teamRow && teamRow.team_key === 'safeguarding';
+    if (teamIds.length) {
+      const teamRows = await query('SELECT team_key FROM teams WHERE id = ANY($1::uuid[])', [teamIds]);
+      isSafeguarding = teamRows.some((r) => r.team_key === 'safeguarding');
     }
     const requestedConfidentiality = body.confidentialityLevel !== undefined ? (body.confidentialityLevel || 'summary') : (existing.confidentiality_level || 'summary');
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
@@ -1017,19 +1099,18 @@ function createApi(env, actorEmail) {
     const concern = await queryOne(
       [
         'UPDATE concerns SET',
-        '  title = $1, summary = $2, severity = $3, team_id = $4,',
-        '  category = $5, confidentiality_level = $6,',
-        '  referral_type = $7, referral_date = $8, referral_outcome = $9,',
-        '  incident_type = $10, action_taken = $11, action_note = $12,',
-        '  behaviour_plan_active = $13,',
-        '  updated_at = NOW(), updated_by = $14',
-        'WHERE id = $15 AND deleted_at IS NULL RETURNING *',
+        '  title = $1, summary = $2, severity = $3,',
+        '  category = $4, confidentiality_level = $5,',
+        '  referral_type = $6, referral_date = $7, referral_outcome = $8,',
+        '  incident_type = $9, action_taken = $10, action_note = $11,',
+        '  behaviour_plan_active = $12,',
+        '  updated_at = NOW(), updated_by = $13',
+        'WHERE id = $14 AND deleted_at IS NULL RETURNING *',
       ].join('\n'),
       [
         body.title || existing.title,
         body.summary || existing.summary,
         body.severity || existing.severity,
-        teamId,
         derivedCategory,
         confidentialityLevel,
         referralType,
@@ -1043,7 +1124,15 @@ function createApi(env, actorEmail) {
         concernId,
       ]
     );
-    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'update', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { severity: body.severity, teamId } });
+    // Replace junction rows atomically
+    await query('DELETE FROM concern_teams WHERE concern_id = $1', [concernId]);
+    if (teamIds.length) {
+      await query(
+        'INSERT INTO concern_teams (concern_id, team_id) SELECT $1, UNNEST($2::uuid[]) ON CONFLICT DO NOTHING',
+        [concernId, teamIds]
+      );
+    }
+    await writeAuditLog(auth, { areaKey: 'concerns', actionKey: 'update', entityType: 'concern', entityId: concernId, studentId: existing.student_id, metadata: { severity: body.severity, teamIds } });
     return { concern };
   }
 
@@ -1088,51 +1177,72 @@ function createApi(env, actorEmail) {
   async function createMeeting(auth, body) {
     await assertPermission(auth, 'meetings.create');
     if (!body.studentId || !body.interactionType || !body.title || !body.summary || !body.occurredAt) throw new AppError('studentId, interactionType, title, summary, and occurredAt are required');
+    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
     const meeting = await queryOne(
       [
         'INSERT INTO meetings',
-        '  (student_id, team_id, logged_by_user_id, interaction_type, visibility_level, confidentiality_level,',
+        '  (student_id, logged_by_user_id, interaction_type, visibility_level, confidentiality_level,',
         '   title, summary, detail, occurred_at, external_agency, external_contact_name, external_ref,',
         '   created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $3, $3) RETURNING *',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $2, $2) RETURNING *',
       ].join('\n'),
       [
-        body.studentId, body.teamId || null, auth.userId,
+        body.studentId, auth.userId,
         body.interactionType, body.visibilityLevel || 'summary', body.confidentialityLevel || 'summary',
         body.title, body.summary, body.detail || null, body.occurredAt,
         body.externalAgency || null, body.externalContactName || null, body.externalRef || null,
       ]
     );
+    if (teamIds.length) {
+      await query(
+        'INSERT INTO meeting_teams (meeting_id, team_id) SELECT $1, UNNEST($2::uuid[]) ON CONFLICT DO NOTHING',
+        [meeting.id, teamIds]
+      );
+    }
     const eventType = body.externalAgency && body.externalAgency !== '' ? 'external_agency_contact' : 'meeting_logged';
-    await addChronology(auth, body.studentId, 'meetings', meeting.id, eventType, body.teamId, body.title, body.summary, body.detail, body.visibilityLevel || 'summary', body.occurredAt);
+    await addChronology(auth, body.studentId, 'meetings', meeting.id, eventType, teamIds[0] || null, body.title, body.summary, body.detail, body.visibilityLevel || 'summary', body.occurredAt);
     return { meeting };
   }
 
   async function createNote(auth, body) {
     await assertPermission(auth, 'notes.create');
     if (!body.studentId || !body.summary || !body.body) throw new AppError('studentId, summary, and body are required');
+    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
     const note = await queryOne(
       [
-        'INSERT INTO notes (student_id, team_id, author_user_id, note_type, visibility_level, confidentiality_level, summary, body, concern_id, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $3, $3) RETURNING *',
+        'INSERT INTO notes (student_id, author_user_id, note_type, visibility_level, confidentiality_level, summary, body, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $2, $2) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, auth.userId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body, body.concernId || null]
+      [body.studentId, auth.userId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body, body.concernId || null]
     );
-    await addChronology(auth, body.studentId, 'notes', note.id, 'note_added', body.teamId, body.summary, body.summary, body.body, body.visibilityLevel || 'summary');
+    if (teamIds.length) {
+      await query(
+        'INSERT INTO note_teams (note_id, team_id) SELECT $1, UNNEST($2::uuid[]) ON CONFLICT DO NOTHING',
+        [note.id, teamIds]
+      );
+    }
+    await addChronology(auth, body.studentId, 'notes', note.id, 'note_added', teamIds[0] || null, body.summary, body.summary, body.body, body.visibilityLevel || 'summary');
     return { note };
   }
 
   async function createFollowUp(auth, body) {
     await assertPermission(auth, 'actions.manage');
     if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
+    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
     const action = await queryOne(
       [
-        'INSERT INTO actions (student_id, team_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, concern_id, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $3, $3) RETURNING *',
+        'INSERT INTO actions (student_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $2, $2) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.teamId || null, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary', body.concernId || null]
+      [body.studentId, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary', body.concernId || null]
     );
-    await addChronology(auth, body.studentId, 'actions', action.id, 'follow_up_created', body.teamId, body.title, body.summary, null, 'summary');
+    if (teamIds.length) {
+      await query(
+        'INSERT INTO action_teams (action_id, team_id) SELECT $1, UNNEST($2::uuid[]) ON CONFLICT DO NOTHING',
+        [action.id, teamIds]
+      );
+    }
+    await addChronology(auth, body.studentId, 'actions', action.id, 'follow_up_created', teamIds[0] || null, body.title, body.summary, null, 'summary');
     return { action };
   }
 
@@ -1186,37 +1296,44 @@ function createApi(env, actorEmail) {
     const rows = await query(
       [
         'SELECT * FROM (',
-        "  SELECT 'meeting' AS item_type, m.id, m.student_id, m.team_id, s.first_name, s.last_name, s.year_group,",
+        "  SELECT 'meeting' AS item_type, m.id, m.student_id, s.first_name, s.last_name, s.year_group,",
         '    m.title, m.summary, m.detail, m.interaction_type, m.visibility_level, m.occurred_at AS calendar_at,',
         '    m.occurred_at, m.created_at, m.logged_by_user_id AS assigned_user_id, u.display_name AS assigned_user_name,',
         "    'scheduled'::text AS item_status, NULL::timestamptz AS due_at, NULL::timestamptz AS completed_at, NULL::text AS priority,",
-        '    t.name AS team_name',
+        '    COALESCE(ARRAY_AGG(DISTINCT mt.team_id) FILTER (WHERE mt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+        "    COALESCE(STRING_AGG(DISTINCT t.name, ', ') FILTER (WHERE t.name IS NOT NULL), NULL) AS team_name",
         '  FROM meetings m',
         '  JOIN students s ON s.id = m.student_id',
-        '  LEFT JOIN teams t ON t.id = m.team_id',
+        '  LEFT JOIN meeting_teams mt ON mt.meeting_id = m.id',
+        '  LEFT JOIN teams t ON t.id = mt.team_id',
         '  LEFT JOIN users u ON u.id = m.logged_by_user_id',
         '  WHERE m.deleted_at IS NULL AND s.deleted_at IS NULL',
+        '  GROUP BY m.id, s.id, u.display_name',
         '  UNION ALL',
-        "  SELECT 'follow_up' AS item_type, a.id, a.student_id, a.team_id, s.first_name, s.last_name, s.year_group,",
+        "  SELECT 'follow_up' AS item_type, a.id, a.student_id, s.first_name, s.last_name, s.year_group,",
         "    a.title, a.summary, NULL::text AS detail, 'follow_up' AS interaction_type, COALESCE(a.visibility_level, 'summary') AS visibility_level,",
         '    COALESCE(a.due_at, a.created_at) AS calendar_at, COALESCE(a.due_at, a.created_at) AS occurred_at, a.created_at,',
         '    a.owner_user_id AS assigned_user_id, u.display_name AS assigned_user_name, a.status AS item_status,',
-        '    a.due_at, a.completed_at, a.priority, t.name AS team_name',
+        '    a.due_at, a.completed_at, a.priority,',
+        '    COALESCE(ARRAY_AGG(DISTINCT at2.team_id) FILTER (WHERE at2.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+        "    COALESCE(STRING_AGG(DISTINCT t.name, ', ') FILTER (WHERE t.name IS NOT NULL), NULL) AS team_name",
         '  FROM actions a',
         '  JOIN students s ON s.id = a.student_id',
-        '  LEFT JOIN teams t ON t.id = a.team_id',
+        '  LEFT JOIN action_teams at2 ON at2.action_id = a.id',
+        '  LEFT JOIN teams t ON t.id = at2.team_id',
         '  LEFT JOIN users u ON u.id = a.owner_user_id',
         '  WHERE a.deleted_at IS NULL AND s.deleted_at IS NULL',
+        '  GROUP BY a.id, s.id, u.display_name',
         ') m',
         'WHERE ' + filterSql + ' AND ' + searchSql,
         '  AND (m.assigned_user_id = $' + (params.length + 1),
-        '    OR m.team_id IS NULL',
-        '    OR m.team_id = ANY($' + (params.length + 2) + '::uuid[])',
+        '    OR m.team_ids = ARRAY[]::uuid[]',
+        '    OR m.team_ids && $' + (params.length + 2) + '::uuid[]',
         '    OR EXISTS (',
         '      SELECT 1 FROM team_visibility_rules tvr',
         '      WHERE tvr.deleted_at IS NULL',
         '        AND tvr.source_team_id = ANY($' + (params.length + 2) + '::uuid[])',
-        '        AND tvr.target_team_id = m.team_id',
+        '        AND tvr.target_team_id = ANY(m.team_ids)',
         "        AND tvr.content_type IN ('meetings', 'actions')",
         "        AND tvr.visibility_level <> 'none'",
         '    )',
