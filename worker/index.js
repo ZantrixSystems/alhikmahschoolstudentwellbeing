@@ -169,6 +169,29 @@ function buildNeonSqlEndpoint(connectionString) {
   return 'https://' + match[1].replace(/^[^.]+\./, 'api.') + '/sql';
 }
 
+function parseNeonValue(value, dataTypeID) {
+  if (value === null || value === undefined) return value;
+  // Postgres array type IDs are the scalar type ID + 1 in most cases,
+  // but the reliable signal is that the value is a string starting with '{'.
+  if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+    const inner = value.slice(1, -1);
+    if (inner === '') return [];
+    // Split on commas that are not inside quotes
+    const parts = [];
+    let current = '';
+    let inQuote = false;
+    for (let i = 0; i < inner.length; i++) {
+      const ch = inner[i];
+      if (ch === '"') { inQuote = !inQuote; continue; }
+      if (ch === ',' && !inQuote) { parts.push(current); current = ''; continue; }
+      current += ch;
+    }
+    parts.push(current);
+    return parts.map((p) => p === 'NULL' ? null : p);
+  }
+  return value;
+}
+
 function mapNeonRows(result) {
   const rows = result.rows || [];
   if (!rows.length || !Array.isArray(rows[0])) return rows;
@@ -176,7 +199,7 @@ function mapNeonRows(result) {
   return rows.map((row) => {
     const mapped = {};
     fields.forEach((field, index) => {
-      mapped[field.name] = row[index];
+      mapped[field.name] = parseNeonValue(row[index], field.dataTypeID);
     });
     return mapped;
   });
