@@ -512,7 +512,6 @@ function createApi(env, actorEmail) {
 
   function meetingFieldMap() {
     return {
-      teamId: buildFieldRule('m.team_id'),
       assignedTo: buildFieldRule('m.assigned_user_id'),
       type: buildFieldRule('m.item_type'),
       interactionType: buildFieldRule('m.interaction_type'),
@@ -602,7 +601,7 @@ function createApi(env, actorEmail) {
         summary: record.summary || 'Protected event',
         occurred_at: record.occurred_at,
         created_at: record.created_at,
-        team_id: record.team_id,
+        team_ids: record.team_ids || [],
         team_name: record.team_name,
         visibility,
         redacted: true,
