@@ -667,16 +667,19 @@ function createApi(env, actorEmail) {
     const upcomingFollowUpsQuery = canViewMeetings
       ? query(
           [
-            "SELECT 'follow_up' AS item_type, a.id, a.student_id, a.team_id, s.first_name, s.last_name,",
+            "SELECT 'follow_up' AS item_type, a.id, a.student_id, s.first_name, s.last_name,",
             "  a.title, a.summary, 'follow_up' AS interaction_type, COALESCE(a.visibility_level, 'summary') AS visibility_level,",
             '  COALESCE(a.due_at, a.created_at) AS calendar_at, COALESCE(a.due_at, a.created_at) AS occurred_at,',
-            '  a.status AS item_status, a.due_at, a.priority, t.name AS team_name,',
+            "  a.status AS item_status, a.due_at, a.priority,",
+            "  COALESCE(STRING_AGG(DISTINCT t.name, ', ') FILTER (WHERE t.name IS NOT NULL), NULL) AS team_name,",
             '  u.display_name AS assigned_user_name',
             'FROM actions a',
             'JOIN students s ON s.id = a.student_id AND s.deleted_at IS NULL',
-            'LEFT JOIN teams t ON t.id = a.team_id',
+            'LEFT JOIN action_teams at2 ON at2.action_id = a.id',
+            'LEFT JOIN teams t ON t.id = at2.team_id',
             'LEFT JOIN users u ON u.id = a.owner_user_id',
             "WHERE a.deleted_at IS NULL AND a.owner_user_id = $1 AND a.status IN ('open', 'in_progress')",
+            'GROUP BY a.id, s.id, u.display_name',
             'ORDER BY COALESCE(a.due_at, a.created_at) ASC LIMIT 6',
           ].join('\n'),
           [auth.userId]
@@ -689,13 +692,15 @@ function createApi(env, actorEmail) {
             'SELECT c.id, c.student_id, s.first_name, s.last_name, s.student_code, s.year_group,',
             '  c.title, c.status, c.severity, c.urgency, c.category, c.referral_type,',
             '  c.created_at, c.updated_at, c.occurred_at,',
-            '  t.name AS team_name, u.display_name AS submitted_by_name',
+            "  STRING_AGG(DISTINCT t.name, ', ') AS team_name, u.display_name AS submitted_by_name",
             'FROM concerns c',
             'JOIN students s ON s.id = c.student_id AND s.deleted_at IS NULL',
-            'LEFT JOIN teams t ON t.id = c.team_id',
+            'JOIN concern_teams ct ON ct.concern_id = c.id',
+            'JOIN teams t ON t.id = ct.team_id',
             'LEFT JOIN users u ON u.id = c.submitted_by_user_id',
             "WHERE c.deleted_at IS NULL AND t.team_key = 'safeguarding'",
             "  AND c.status IN ('open', 'triage', 'escalated')",
+            'GROUP BY c.id, s.id, u.display_name',
             "ORDER BY CASE c.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,",
             '  c.updated_at DESC',
             'LIMIT 30',
@@ -717,7 +722,8 @@ function createApi(env, actorEmail) {
         [
           'SELECT t.id, t.name, t.team_key, t.accent_color, COUNT(DISTINCT c.student_id)::int AS active_students',
           'FROM teams t',
-          "LEFT JOIN concerns c ON c.team_id = t.id AND c.deleted_at IS NULL AND c.status IN ('open','triage','escalated')",
+          "LEFT JOIN concern_teams ct ON ct.team_id = t.id",
+          "LEFT JOIN concerns c ON c.id = ct.concern_id AND c.deleted_at IS NULL AND c.status IN ('open','triage','escalated')",
           'WHERE t.deleted_at IS NULL',
           'GROUP BY t.id',
           'ORDER BY t.name',
@@ -1075,9 +1081,10 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       [body.outcomeSummary, auth.userId, JSON.stringify([logEntry]), concernId]
     );
+    const closingTeam = await queryOne('SELECT team_id FROM concern_teams WHERE concern_id = $1 LIMIT 1', [concernId]);
     await addChronology(
       auth, existing.student_id, 'concerns', concernId, 'concern_logged',
-      existing.team_id,
+      closingTeam ? closingTeam.team_id : null,
       'Concern closed: ' + existing.title,
       body.outcomeSummary,
       body.closureNote || null,
