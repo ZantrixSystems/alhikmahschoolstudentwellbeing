@@ -1968,7 +1968,6 @@ const state = {
       document.getElementById('settingsBody').outerHTML = '<div id="settingsBody">' + (bodyByTab[tab] || '') + '</div>';
       bindSettingsForms();
       if (tab === 'audit') loadAuditLog();
-      if (tab === 'students') loadStudentsManagement();
     }
 
     const cachedRef = getCached('settings:reference');
@@ -2602,7 +2601,7 @@ const state = {
     const smStudentListWrap = document.getElementById('smStudentListWrap');
     if (smToggleList) smToggleList.onclick = () => {
       const hidden = smStudentListWrap.classList.toggle('hidden');
-      smToggleList.textContent = hidden ? 'Show current students' : 'Hide student list';
+      smToggleList.textContent = hidden ? 'Show current students' : 'Hide students';
       if (!hidden && !document.querySelector('.sm-student-chk')) loadStudentsManagement();
     };
 
