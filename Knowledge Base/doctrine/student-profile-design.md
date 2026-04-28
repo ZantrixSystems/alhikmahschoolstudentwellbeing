@@ -19,11 +19,10 @@ The student profile is the operational centre of the interim app.
 - Add concern
 - Add follow-up
 - Add radar
-- Update status
 
 ## Timeline
 
-Timeline entries may represent notes, concerns, meetings, follow-ups, radar changes, status changes, and assignment changes. Entries must respect visibility:
+Timeline entries may represent notes, concerns, meetings, follow-ups, radar changes, and assignment changes. Entries must respect visibility:
 
 - indicator access shows that an event happened
 - summary access shows safe metadata and summaries

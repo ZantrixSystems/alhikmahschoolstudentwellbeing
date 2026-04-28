@@ -1040,7 +1040,7 @@ const state = {
           <input id="studentSearch" class="search-input" value="${escapeHtml(state.route.q)}" placeholder="Search name or code">
           <input id="filterYear" placeholder="Year / class">
           <select id="filterRadar"><option value="">Any radar</option>${teamOptions}</select>
-          <select id="filterStatus"><option value="">Any status</option><option value="active">Active</option><option value="monitoring">Monitoring</option><option value="closed">Closed</option></select>
+          <select id="filterStatus"><option value="">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
           <input id="filterLead" placeholder="Lead">
           <input id="filterLatestAfter" type="date" title="Activity after">
           <input id="filterLatestBefore" type="date" title="Activity before">
@@ -1259,11 +1259,6 @@ const state = {
           <textarea id="radarSummary" class="span-2" rows="3" placeholder="Why is this student on this radar?"></textarea>
           <button class="button span-2" id="submitRadar">Add radar</button>
         </div>`,
-      status: `
-        <div class="form-grid">
-          <select id="studentStatus" class="span-2"><option value="active">Active</option><option value="monitoring">Monitoring</option><option value="closed">Closed</option><option value="archived">Archived</option></select>
-          <button class="button span-2" id="submitStatus">Update status</button>
-        </div>`,
       closeconcern: (() => {
         const openConcerns = (data && data.concerns || []).filter((c) => ['open','triage','escalated'].includes(c.status));
         if (!openConcerns.length) return '<p class="muted small">No open cases to close.</p>';
@@ -1372,11 +1367,6 @@ const state = {
       severity: document.getElementById('radarSeverity').value,
       status: document.getElementById('radarStatus').value,
       summary: document.getElementById('radarSummary').value,
-    });
-    const submitStatus = document.getElementById('submitStatus');
-    if (submitStatus) submitStatus.onclick = () => postProfile('/api/students/status', {
-      studentId: state.route.studentId,
-      status: document.getElementById('studentStatus').value,
     });
     const submitCloseConcern = document.getElementById('submitCloseConcern');
     if (submitCloseConcern) submitCloseConcern.onclick = () => {
@@ -1777,7 +1767,6 @@ const state = {
         ['closeconcern', 'Close case', 'concerns.close'],
         ['sendplan', 'SEND plan', 'send.manage'],
         ['followup', 'Add follow-up', 'actions.manage'],
-        ['status', 'Update status', 'students.manage'],
       ].filter(([, , permission]) => hasPermission(permission));
 
       target.innerHTML = `
@@ -2014,8 +2003,6 @@ const state = {
               <select id="smFilterStatus" style="flex:1">
                 <option value="">Any status</option>
                 <option value="active">Active</option>
-                <option value="monitoring">Monitoring</option>
-                <option value="closed">Closed</option>
                 <option value="inactive">Inactive</option>
               </select>
               <button class="button" id="smApplyFilter">Search</button>
@@ -2025,8 +2012,6 @@ const state = {
               <span id="smBulkCount" class="muted small"></span>
               <select id="smBulkStatus" style="width:auto">
                 <option value="active">Set Active</option>
-                <option value="monitoring">Set Monitoring</option>
-                <option value="closed">Set Closed</option>
                 <option value="inactive">Set Inactive</option>
               </select>
               <button class="button" id="smBulkApply">Apply to selected</button>

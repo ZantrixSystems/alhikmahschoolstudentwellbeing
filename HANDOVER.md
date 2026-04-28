@@ -66,7 +66,8 @@ Local migration secret:
 - Toggle Students between Builder and Advanced filter modes.
 - Confirm Dashboard, Calendar, and Settings load without large layout jumps.
 - Create a student as a caseworker/admin.
-- Open a profile and add a note, meeting, concern, follow-up, radar, and status change.
+- Open a profile and add a note, meeting, concern, follow-up, and radar.
+- In Settings / Student Management, verify active/inactive student lifecycle status changes.
 - Log a safeguarding concern and verify referral fields appear conditionally.
 - Close a concern and verify outcome summary is required.
 - Add a SEND plan and verify it appears in the sidebar panel.

@@ -1487,14 +1487,6 @@ function createApi(env, actorEmail) {
     return { action };
   }
 
-  async function updateStudentStatus(auth, body) {
-    await assertPermission(auth, 'students.manage');
-    if (!body.studentId || !body.status) throw new AppError('studentId and status are required');
-    const student = await queryOne('UPDATE students SET current_status = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3 AND deleted_at IS NULL RETURNING *', [body.status, auth.userId, body.studentId]);
-    await addChronology(auth, body.studentId, 'students', body.studentId, 'status_changed', null, 'Status changed', 'Status changed to ' + body.status, null, 'summary');
-    return { student };
-  }
-
   async function importStudents(auth, body) {
     await assertPermission(auth, 'students.manage');
     const rows = body.students;
@@ -1538,7 +1530,7 @@ function createApi(env, actorEmail) {
     await assertPermission(auth, 'students.manage');
     const { studentIds, status } = body;
     if (!Array.isArray(studentIds) || studentIds.length === 0) throw new AppError('studentIds array is required');
-    if (!['active', 'monitoring', 'closed', 'inactive'].includes(status)) throw new AppError('Invalid status');
+    if (!['active', 'inactive'].includes(status)) throw new AppError('Invalid status');
     await query(
       `UPDATE students SET current_status=$1, updated_at=NOW(), updated_by=$2 WHERE id = ANY($3::uuid[]) AND deleted_at IS NULL`,
       [status, auth.userId, studentIds]
@@ -1927,7 +1919,6 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/notes') return createNote(auth, payload);
     if (method === 'post' && path === '/api/follow-ups') return createFollowUp(auth, payload);
     if (method === 'post' && path === '/api/radar') return addRadar(auth, payload);
-    if (method === 'post' && path === '/api/students/status') return updateStudentStatus(auth, payload);
     if (method === 'post' && path === '/api/students/import') return importStudents(auth, payload);
     if (method === 'post' && path === '/api/students/bulk-status') return bulkUpdateStudentStatus(auth, payload);
     if (method === 'post' && /^\/api\/students\/[^/]+\/delete$/.test(path)) return deleteStudent(auth, path.split('/')[3]);
