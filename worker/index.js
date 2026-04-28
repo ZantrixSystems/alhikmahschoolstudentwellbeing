@@ -1,3 +1,5 @@
+const APP_HTML = '__APP_HTML_PLACEHOLDER__';
+
 const VISIBILITY_LEVELS = ['none', 'indicator', 'summary', 'full'];
 const FILTER_OPERATORS = ['=isnull=', '=in=', '=out=', '~=', '==', '!=', '>=', '<=', '>', '<'];
 const VALID_REFERRAL_TYPES = ['none', 'mash', 'lado', 'police', 'early_help', 'camhs', 'social_care', 'other'];
@@ -18,34 +20,70 @@ class AppError extends Error {
 
 export default {
   async fetch(request, env) {
-    try {
-      const url = new URL(request.url);
-      if (request.method === 'GET' && url.pathname === '/health') {
-        return json({ ok: true, service: 'al-hikmah-wellbeing-worker' });
-      }
-      if (request.method !== 'POST' || url.pathname !== '/api/proxy') {
-        throw new AppError('Route not found', 404);
-      }
+    const url = new URL(request.url);
 
-      const rawBody = await request.text();
-      await verifySignedAppsScriptRequest(request, rawBody, env);
-      const body = rawBody ? JSON.parse(rawBody) : {};
-      const email = request.headers.get('X-AHW-User-Email') || '';
-      const api = createApi(env, email.toLowerCase());
-      const data = await api.dispatch(body);
-      return json({ ok: true, data });
-    } catch (error) {
-      const status = error.statusCode || 500;
-      return json({
-        ok: false,
-        error: {
-          message: status >= 500 ? 'Worker request failed' : error.message,
-          details: error.details || null,
-        },
-      }, status);
+    // CORS preflight
+    if (request.method === 'OPTIONS') return corsResponse();
+
+    // Health check
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return addCors(json({ ok: true, service: 'al-hikmah-wellbeing-worker' }));
     }
+
+    // Serve the SPA
+    if (request.method === 'GET' && url.pathname === '/') {
+      const html = APP_HTML.replaceAll('__GOOGLE_CLIENT_ID__', env.GOOGLE_CLIENT_ID || '');
+      return new Response(html, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders() },
+      });
+    }
+
+    // API routes
+    if (url.pathname.startsWith('/api/')) {
+      try {
+        const email = await verifyGoogleIdToken(request, env);
+        const api = createApi(env, email);
+        const query = Object.fromEntries(url.searchParams);
+        let payload = {};
+        if (['POST', 'PUT', 'PATCH'].includes(request.method)) {
+          const text = await request.text();
+          try {
+            payload = text ? JSON.parse(text) : {};
+          } catch (error) {
+            throw new AppError('Invalid JSON request body', 400);
+          }
+        }
+        const data = await api.dispatch({ path: url.pathname, method: request.method.toLowerCase(), query, payload });
+        return addCors(json({ ok: true, data }));
+      } catch (error) {
+        const status = error.statusCode || 500;
+        return addCors(json({ ok: false, error: { message: status >= 500 ? 'Server error' : error.message, details: error.details || null } }, status));
+      }
+    }
+
+    return addCors(json({ ok: false, error: { message: 'Not found' } }, 404));
   },
 };
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+  };
+}
+
+function corsResponse() {
+  return new Response(null, { status: 204, headers: corsHeaders() });
+}
+
+function addCors(response) {
+  const r = new Response(response.body, response);
+  Object.entries(corsHeaders()).forEach(([k, v]) => r.headers.set(k, v));
+  return r;
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -57,85 +95,74 @@ function json(body, status = 200) {
   });
 }
 
-async function verifySignedAppsScriptRequest(request, rawBody, env) {
-  const secret = env.WORKER_SHARED_SECRET;
-  if (!secret) throw new AppError('Worker shared secret is not configured', 500);
+async function verifyGoogleIdToken(request, env) {
+  if (env.__verifyGoogleIdToken) return env.__verifyGoogleIdToken(request, env);
+  const authHeader = request.headers.get('Authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) throw new AppError('Missing Authorization header', 401);
+  const token = authHeader.slice(7);
 
-  const timestamp = request.headers.get('X-AHW-Timestamp') || '';
-  const nonce = request.headers.get('X-AHW-Nonce') || '';
-  const email = (request.headers.get('X-AHW-User-Email') || '').trim().toLowerCase();
-  const signature = request.headers.get('X-AHW-Signature') || '';
-  const keyId = request.headers.get('X-AHW-Key-Id') || 'apps-script-main';
-  if (!timestamp || !nonce || !email || !signature) {
-    throw new AppError('Missing signed bridge headers', 401);
-  }
-  const timestampMs = Number(timestamp);
-  if (!Number.isFinite(timestampMs)) {
-    throw new AppError('Invalid signed request timestamp', 401);
-  }
-  if (Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
-    throw new AppError('Signed request expired', 401);
+  // Decode JWT header+payload (no library needed — Workers has WebCrypto)
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new AppError('Invalid token format', 401);
+
+  let payload;
+  try {
+    payload = JSON.parse(decodeBase64Url(parts[1]));
+  } catch (error) {
+    throw new AppError('Invalid token payload', 401);
   }
 
-  const canonical = [timestamp, nonce, email, rawBody].join('\n');
-  const expected = await hmacHex(secret, canonical);
-  if (!timingSafeEqual(signature, expected)) {
-    throw new AppError('Invalid Worker bridge signature', 401);
+  // Verify expiry
+  if (!payload.exp || Date.now() / 1000 > payload.exp) throw new AppError('Token expired', 401);
+
+  // Verify issuer
+  if (payload.iss !== 'accounts.google.com' && payload.iss !== 'https://accounts.google.com') {
+    throw new AppError('Invalid token issuer', 401);
   }
-  await persistSignedRequestNonce(env, {
-    keyId,
-    nonce,
-    email,
-    timestamp: new Date(timestampMs),
-  });
+
+  // Verify audience matches our Google Client ID
+  const clientId = env.GOOGLE_CLIENT_ID;
+  if (!clientId) throw new AppError('GOOGLE_CLIENT_ID not configured', 500);
+  if (payload.aud !== clientId) throw new AppError('Token audience mismatch', 401);
+
+  // Verify signature using Google's public keys
+  await verifyGoogleTokenSignature(token, parts, env);
+
+  const email = (payload.email || '').toLowerCase();
+  if (!email) throw new AppError('Token has no email claim', 401);
+  return email;
 }
 
-async function persistSignedRequestNonce(env, requestNonce) {
-  const nonceHash = await sha256Hex(requestNonce.nonce);
-  await workerQuery(
-    env,
-    'DELETE FROM signed_request_nonces WHERE expires_at < NOW()',
-    []
-  );
-  const row = await workerQueryOne(
-    env,
-    [
-      'INSERT INTO signed_request_nonces (key_id, nonce_hash, actor_email, request_timestamp, expires_at)',
-      "VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes')",
-      'ON CONFLICT (key_id, nonce_hash) DO NOTHING',
-      'RETURNING nonce_hash',
-    ].join('\n'),
-    [requestNonce.keyId, nonceHash, requestNonce.email, requestNonce.timestamp.toISOString()]
-  );
-  if (!row) throw new AppError('Signed request nonce has already been used', 401);
-}
+async function verifyGoogleTokenSignature(token, parts, env) {
+  // Fetch Google's public keys (they're cached by Cloudflare CDN automatically)
+  const certsResp = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+  if (!certsResp.ok) throw new AppError('Could not fetch Google public keys', 500);
+  const certs = await certsResp.json();
 
-async function sha256Hex(value) {
-  const encoder = new TextEncoder();
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)));
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function hmacHex(secret, value) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)));
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function timingSafeEqual(left, right) {
-  if (!left || !right || left.length !== right.length) return false;
-  let result = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    result |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  let header;
+  try {
+    header = JSON.parse(decodeBase64Url(parts[0]));
+  } catch (error) {
+    throw new AppError('Invalid token header', 401);
   }
-  return result === 0;
+  const jwk = certs.keys.find(k => k.kid === header.kid);
+  if (!jwk) throw new AppError('No matching key found for token', 401);
+
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const signedData = new TextEncoder().encode(parts[0] + '.' + parts[1]);
+  let sigBytes;
+  try {
+    sigBytes = Uint8Array.from(decodeBase64Url(parts[2]), c => c.charCodeAt(0));
+  } catch (error) {
+    throw new AppError('Invalid token signature', 401);
+  }
+  const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sigBytes, signedData);
+  if (!valid) throw new AppError('Token signature invalid', 401);
+}
+
+function decodeBase64Url(value) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  return atob(base64);
 }
 
 async function workerQuery(env, sql, params = []) {
@@ -1661,10 +1688,6 @@ function compactUnique(values) {
 export {
   AppError,
   createApi,
-  hmacHex,
-  persistSignedRequestNonce,
-  timingSafeEqual,
-  verifySignedAppsScriptRequest,
   workerQuery,
   VALID_REFERRAL_TYPES,
   VALID_SEND_CATEGORIES,

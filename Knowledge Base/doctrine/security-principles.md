@@ -8,4 +8,4 @@
 - redaction over overexposure
 - separate Google authentication from internal app authorisation
 - domain restriction configurable and enforced server-side
-- deployment should keep database credentials outside Apps Script
+- deployment should keep database credentials Worker-only

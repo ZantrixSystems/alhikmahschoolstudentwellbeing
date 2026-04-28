@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApi, hmacHex, verifySignedAppsScriptRequest, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES } from '../worker/index.js';
+import workerApp, { AppError, createApi, VALID_REFERRAL_TYPES, VALID_SEND_CATEGORIES } from '../worker/index.js';
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
 const SOURCE_TEAM = '22222222-2222-2222-2222-222222222222';
@@ -28,7 +28,7 @@ function makeEnv(options = {}) {
   ];
 
   const env = {
-    WORKER_SHARED_SECRET: 'test-secret',
+    GOOGLE_CLIENT_ID: 'test-client-id',
     calls,
     async __query(sql, params) {
       calls.push({ sql, params });
@@ -87,6 +87,10 @@ function makeEnv(options = {}) {
       }
       if (sql.includes('p.permission_key = $2')) {
         return permissions.includes(params[1]) || roleKeys.includes('admin') ? [{ '?column?': 1 }] : [];
+      }
+      if (sql.includes('SELECT team_key FROM teams WHERE id = ANY')) {
+        const ids = Array.isArray(params[0]) ? params[0] : [];
+        return teamRows.filter((team) => ids.includes(team.id));
       }
       if (sql.includes('SELECT team_key FROM teams WHERE id = $1')) {
         return teamRows.filter((team) => team.id === params[0]);
@@ -351,8 +355,8 @@ test('safeguarding concern is automatically marked safeguarding confidentiality'
   const originalQuery = env.__query.bind(env);
   env.__query = async (sql, params) => {
     if (sql.includes('INSERT INTO concerns')) {
-      // confidentiality_level is the 8th param ($8)
-      insertedConfidentiality = params[7];
+      // confidentiality_level is the 7th param ($7)
+      insertedConfidentiality = params[6];
       return [{ id: 'c-1', student_id: STUDENT_ID, category: 'safeguarding', team_id: SAFEGUARDING_TEAM }];
     }
     return originalQuery(sql, params);
@@ -559,45 +563,68 @@ test('creating a concern stores managed incident and action_taken values', async
     method: 'post',
     payload: { studentId: STUDENT_ID, title: 'T', summary: 'S', incidentType: 'verbal', actionTaken: 'parent_contacted' },
   });
-  assert.equal(insertParams[14], 'verbal');
-  assert.equal(insertParams[15], 'parent_contacted');
+  assert.equal(insertParams[13], 'verbal');
+  assert.equal(insertParams[14], 'parent_contacted');
 });
 
-test('signed request nonce cannot be replayed', async () => {
-  const seen = new Set();
-  const env = {
-    WORKER_SHARED_SECRET: 'test-secret',
-    async __query(sql, params) {
-      if (sql.startsWith('DELETE FROM signed_request_nonces')) return [];
-      if (sql.includes('INSERT INTO signed_request_nonces')) {
-        const key = params[0] + ':' + params[1];
-        if (seen.has(key)) return [];
-        seen.add(key);
-        return [{ nonce_hash: params[1] }];
-      }
-      return [];
-    },
-  };
-  const body = JSON.stringify({ path: '/api/bootstrap', method: 'get', query: {}, payload: {} });
-  const timestamp = String(Date.now());
-  const nonce = 'nonce-1';
-  const email = 'worker.test@alhikmah.example.org';
-  const signature = await hmacHex('test-secret', [timestamp, nonce, email, body].join('\n'));
-  const request = () => new Request('https://worker.test/api/proxy', {
-    method: 'POST',
-    body,
-    headers: {
-      'X-AHW-Key-Id': 'apps-script-main',
-      'X-AHW-Timestamp': timestamp,
-      'X-AHW-Nonce': nonce,
-      'X-AHW-User-Email': email,
-      'X-AHW-Signature': signature,
-    },
-  });
+test('direct Worker route requires bearer auth', async () => {
+  const response = await workerApp.fetch(new Request('https://worker.test/api/bootstrap'), makeEnv());
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.ok, false);
+  assert.match(body.error.message, /Missing Authorization header/);
+});
 
-  await verifySignedAppsScriptRequest(request(), body, env);
-  await assert.rejects(
-    () => verifySignedAppsScriptRequest(request(), body, env),
-    /nonce has already been used/
+test('direct Worker route rejects malformed bearer tokens as auth failures', async () => {
+  const response = await workerApp.fetch(
+    new Request('https://worker.test/api/bootstrap', {
+      headers: { Authorization: 'Bearer abc.def.ghi' },
+    }),
+    makeEnv()
   );
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.ok, false);
+  assert.match(body.error.message, /Invalid token payload/);
+});
+
+test('direct Worker route maps URL query params into dispatch query', async () => {
+  const env = makeEnv({
+    permissions: ['students.view'],
+    studentRows: [{ id: STUDENT_ID, student_code: 'A001', first_name: 'Amina', last_name: 'Khan', flags: [] }],
+  });
+  env.__verifyGoogleIdToken = (request) => {
+    if (request.headers.get('Authorization') !== 'Bearer test-token') throw new AppError('Missing Authorization header', 401);
+    return 'worker.test@alhikmah.example.org';
+  };
+
+  const response = await workerApp.fetch(
+    new Request('https://worker.test/api/students?q=Amina&filter=year==7', {
+      headers: { Authorization: 'Bearer test-token' },
+    }),
+    env
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.data.filter, 'year==7');
+  assert.equal(env.calls.some((call) => call.params.includes('%amina%')), true);
+});
+
+test('direct Worker POST rejects malformed JSON with 400', async () => {
+  const env = makeEnv();
+  env.__verifyGoogleIdToken = () => 'worker.test@alhikmah.example.org';
+  const response = await workerApp.fetch(
+    new Request('https://worker.test/api/students', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' },
+      body: '{not json',
+    }),
+    env
+  );
+  const body = await response.json();
+  assert.equal(response.status, 400);
+  assert.equal(body.ok, false);
+  assert.match(body.error.message, /Invalid JSON request body/);
 });

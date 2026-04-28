@@ -2,37 +2,28 @@
 
 ## Current Approach
 
-- Staff authenticate by opening the Google Apps Script web app inside the school Workspace context.
-- Apps Script reads the active user email with `Session.getActiveUser()`.
-- Apps Script signs every Worker request with:
-  - key id
-  - timestamp
-  - nonce
-  - asserted Workspace email
-  - HMAC SHA-256 signature
-- The Worker verifies the signature before resolving the internal user record.
+- Staff authenticate in the browser through Google Identity Services.
+- The browser receives a Google ID token for the configured `GOOGLE_CLIENT_ID`.
+- Every API call sends the token in `Authorization: Bearer <id-token>`.
+- The Worker verifies the token before resolving the internal user record.
 
-## Signed Request Model
+## Google ID Token Verification
 
-The canonical string is:
+The Worker verifies:
 
-```text
-timestamp
-nonce
-workspace-email
-json-body
-```
+- token format
+- expiry
+- issuer
+- audience matching `GOOGLE_CLIENT_ID`
+- signature using Google's published JWKs
+- presence of an email claim
 
-The Apps Script property `WORKER_SHARED_SECRET` and Worker secret `WORKER_SHARED_SECRET` must match. Requests older than five minutes are rejected.
-
-## Nonce Replay Protection
-
-After signature verification, the Worker hashes the nonce and inserts it into `signed_request_nonces` with the bridge key id and an expiry timestamp. The `(key_id, nonce_hash)` primary key makes replay attempts fail atomically. Expired nonces are deleted opportunistically during signed request verification.
+The email claim is then lowercased and used to resolve the internal user.
 
 ## Domain Restriction
 
 - Allowed Workspace domains are stored in `app_settings`.
-- Domain checks happen in the Worker.
+- Domain checks happen in the Worker after Google token verification.
 - Domain allowlisting is separate from internal app authorisation.
 
 ## App Authorisation
@@ -46,6 +37,6 @@ After signature verification, the Worker hashes the nonce and inserts it into `s
 
 ## Future Hardening
 
-- Replace opportunistic nonce cleanup with scheduled cleanup if request volume grows.
-- Add Google ID token verification if Apps Script identity becomes insufficient.
+- Cache Google's JWKs with expiry-aware refresh if request volume grows.
 - Add device, network, and anomaly signals for a full MIS platform.
+- Consider database-enforced RLS as an additional layer after the Worker policies are stable.

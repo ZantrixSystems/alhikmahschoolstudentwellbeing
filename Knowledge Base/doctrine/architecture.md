@@ -2,40 +2,37 @@
 
 ## Runtime Shape
 
-- Google Apps Script is the only staff-facing application surface.
-- Apps Script owns the UI shell and Google Workspace identity resolution.
-- Cloudflare Worker is the private API layer.
-- Neon PostgreSQL is the system of record.
-- Local Node tooling is used for migrations, `clasp`, and Worker deployment commands.
+- Cloudflare Worker is the staff-facing application surface and API host.
+- The Worker serves the standalone SPA from `/`.
+- Browser code authenticates with Google Identity Services and calls `/api/*` routes directly.
+- Neon PostgreSQL is the system of record and is reachable only from the Worker.
+- Local Node tooling is used for migrations, Worker build, tests, and deployment.
 
 ## Request Flow
 
-1. Staff open the Apps Script web app URL.
-2. Apps Script resolves the signed-in Workspace email with `Session.getActiveUser()`.
-3. Apps Script signs the request body with `WORKER_SHARED_SECRET`.
-4. Apps Script posts to the Worker `/api/proxy` endpoint.
-5. The Worker verifies timestamp, nonce, Workspace email, and HMAC signature.
-6. The Worker resolves the internal user, roles, teams, permissions, and domain rules.
-7. The Worker compiles structured filters through allowlisted fields and operators.
-8. The Worker sends parameterised SQL to Neon.
-9. The Worker applies team visibility, redaction, response shaping, and audit logging before returning data to Apps Script.
+1. Staff open the Cloudflare Worker URL.
+2. The browser obtains a Google ID token from Google Identity Services.
+3. Browser API calls send `Authorization: Bearer <id-token>` to direct Worker routes.
+4. The Worker verifies issuer, expiry, audience, and signature for the Google ID token.
+5. The Worker resolves the internal user, roles, teams, permissions, and domain rules.
+6. The Worker compiles structured filters through allowlisted fields and operators.
+7. The Worker sends parameterised SQL to Neon.
+8. The Worker applies team visibility, redaction, response shaping, and audit logging before returning data to the browser.
 
 ## Security Boundary
 
-- Browser code never receives the Worker URL directly.
 - Browser code never receives Neon credentials.
-- Neon credentials must not live in Apps Script.
-- Apps Script is trusted for Google Workspace identity only.
+- The Google OAuth client ID may be public; it is not a secret.
 - The Worker is authoritative for permissions, filtering, visibility, redaction, and audit logging.
 - UI hiding is convenience only; all sensitive decisions must be enforced in the Worker.
+- Google authentication only proves identity. Internal app authorisation still depends on active user records, roles, teams, and permissions.
 
 ## Major Layers
 
-- Apps Script HtmlService shell and client UI.
-- Apps Script signed proxy bridge.
+- Worker-served standalone SPA.
 - Cloudflare Worker route, service, filtering, permission, visibility, and audit logic.
 - Neon schema, migrations, and seed data.
 
-## Interim Rationale
+## 2026-04-28 Migration Note
 
-The hybrid model keeps the required Apps Script staff entry point while moving sensitive backend decisions and Neon access into private infrastructure. It is still intentionally beta-sized, but the split creates a cleaner migration path toward a future MIS API.
+Apps Script has been retired from the runtime. The previous proxy model is replaced by direct browser-to-Worker requests authenticated with Google ID tokens. The intended migration path is to keep business rules in the Worker while a future MIS-grade frontend or identity integration can be introduced incrementally.

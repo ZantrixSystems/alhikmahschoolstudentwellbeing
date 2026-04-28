@@ -4,22 +4,17 @@ Interim student wellbeing and casework platform.
 
 ## Runtime
 
-- Apps Script is the only staff-facing web app.
-- Apps Script handles the UI shell and Google Workspace identity.
-- Apps Script signs requests to a private Cloudflare Worker API.
-- The Worker enforces permissions, filtering, visibility, redaction, audit logging, and Neon access.
+- Cloudflare Worker is the staff-facing web app and API.
+- The browser signs in with Google Identity Services and sends a Google ID token to the Worker.
+- The Worker verifies Google identity, then resolves internal users, roles, teams, permissions, visibility, redaction, audit logging, and Neon access.
 - Neon PostgreSQL remains the system of record.
+- Apps Script is no longer part of the runtime or deployment path.
 
 ## UI Standard
 
 - The staff UI should stay compact, stable, and product-focused.
 - Avoid backend or deployment language in visible app copy.
 - Use skeleton loading inside data panels so page headers and filters do not jump while data loads.
-
-## Key IDs
-
-- Apps Script project ID: `19EBgbNt3I_SEYaYEqr1NQEPtnvHlHH5QO3PsdgGlp2997nHoAmWgHOix`
-- Apps Script deployment ID: `AKfycbyGFMjbRi3z06Sm2-GJaHiqtOG2xlyt8zmWuLeCrUprmhFJmsNNVjzD-tqIIv7f9c_bjA`
 
 ## Setup
 
@@ -31,43 +26,26 @@ npm test
 
 ## Worker
 
-Set Worker secrets:
+Set the Neon secret:
 
 ```bash
 npm run worker:secret:database
-npm run worker:secret:bridge
 ```
 
-Deploy:
+Configure `GOOGLE_CLIENT_ID` in `wrangler.toml`, then deploy:
 
 ```bash
 npm run worker:deploy
 ```
 
-Required Worker secrets:
+Required Worker configuration:
 
-- `DATABASE_URL`
-- `WORKER_SHARED_SECRET`
-
-## Apps Script
-
-Required Apps Script script properties:
-
-- `WORKER_API_URL`
-- `WORKER_SHARED_SECRET`
-- `WORKER_KEY_ID` optional
-
-Deploy:
-
-```bash
-npm run apps:push
-npm run apps:deploy
-```
+- `DATABASE_URL` as a Worker secret.
+- `GOOGLE_CLIENT_ID` as a Worker variable.
 
 ## Security Notes
 
-- Do not put Neon credentials in Apps Script.
-- Do not expose the Worker URL as a user-facing app route.
+- Do not expose Neon credentials outside the Worker.
 - SQL is parameterised and structured filters compile only through allowlisted fields.
 - Worker-side permissions and team visibility are authoritative.
-- Signed Apps Script requests use persistent nonce replay protection in Neon.
+- Google authentication is separate from internal authorisation; an authenticated Google account still needs an active internal user record and permissions.

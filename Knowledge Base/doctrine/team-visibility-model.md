@@ -33,7 +33,7 @@ Rules are defined per source team, target team, and content type.
 
 - Applied record-by-record in Worker services
 - Redacted payloads are returned when summary-only access exists
-- Apps Script receives already-shaped records and must not attempt to expand visibility client-side
+- The browser receives already-shaped records and must not attempt to expand visibility client-side
 - Safeguarding concern visibility is derived server-side from team ownership:
   `teams.team_key = 'safeguarding'` forces `concerns.confidentiality_level = 'safeguarding'`
   and drives the safeguarding dashboard query.

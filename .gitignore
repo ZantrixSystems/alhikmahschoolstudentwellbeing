@@ -4,3 +4,5 @@ node_modules/
 npm-debug.log*
 .wrangler/
 .claude/
+worker/index.built.js
+.wrangler-dev.*.log

@@ -15,7 +15,7 @@ This application is an interim student wellbeing and casework platform for schoo
 
 ## UI Pattern
 
-- The Apps Script UI should feel like a compact internal SaaS tool, not a technical demo.
+- The Worker-served UI should feel like a compact internal SaaS tool, not a technical demo.
 - Page headers stay consistent and shallow so useful data appears above the fold.
 - Loading states should appear as stable skeletons inside data regions rather than resizing the whole page.
 - Staff-facing copy should use product language and avoid backend, API, deployment, or implementation wording.
@@ -39,4 +39,4 @@ This application is an interim student wellbeing and casework platform for schoo
 - Full attendance, behaviour, assessment, admissions, or parent portal MIS features
 - Native mobile apps
 - Direct external agency integrations in this release
-- Fully automated Google token verification beyond Apps Script hosted session context
+- Replacing Google Workspace identity in this release

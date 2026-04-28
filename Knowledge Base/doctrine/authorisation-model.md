@@ -23,7 +23,7 @@
 - Worker route-level permission checks
 - Record-level visibility evaluation for student-linked data
 - Content-detail redaction when summary visibility exists without full-detail visibility
-- Apps Script UI hiding only for ergonomics, never as the security boundary
+- Browser UI hiding only for ergonomics, never as the security boundary
 
 ## Auditing
 
