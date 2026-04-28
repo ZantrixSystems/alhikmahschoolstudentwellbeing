@@ -2037,8 +2037,8 @@ const state = {
             <button class="text-button" id="smBulkAddToggle">+ Show form</button>
           </div>
           <div id="smBulkAddForm" class="inline-form hidden">
-            <p class="muted small" style="margin-bottom:8px">One student per line: <strong>StudentID, First name, Last name, Year group</strong> (year group optional)</p>
-            <textarea id="smBulkAddText" rows="8" style="width:100%;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:monospace;font-size:13px;resize:vertical" placeholder="24001, Ali, Ahmed, Year 10&#10;24002, Sara, Khan, Year 9"></textarea>
+            <p class="muted small" style="margin-bottom:8px">One student per line: <strong>StudentID, First name, Last name, Date of birth</strong> (DOB optional, format YYYY-MM-DD — used to auto-calculate year group)</p>
+            <textarea id="smBulkAddText" rows="8" style="width:100%;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:monospace;font-size:13px;resize:vertical" placeholder="24001, Ali, Ahmed, 2010-09-15&#10;24002, Sara, Khan, 2011-03-22"></textarea>
             <div style="display:flex;gap:8px;margin-top:8px">
               <button class="button" id="smBulkAddSave">Import rows</button>
               <button class="button secondary" id="smBulkAddCancel">Cancel</button>
@@ -2092,13 +2092,14 @@ const state = {
         </div>
         <div class="table-scroll">
           <table class="data-table dense-table">
-            <thead><tr><th style="width:36px"></th><th>Student ID</th><th>Name</th><th>Year</th><th>Status</th></tr></thead>
+            <thead><tr><th style="width:36px"></th><th>Student ID</th><th>Name</th><th>Year (calc.)</th><th>Date of Birth</th><th>Status</th></tr></thead>
             <tbody>${students.map((s) => `
               <tr>
                 <td><input type="checkbox" class="sm-student-chk" data-id="${escapeHtml(s.id)}"></td>
                 <td>${escapeHtml(s.student_code)}</td>
                 <td>${escapeHtml(s.first_name)} ${escapeHtml(s.last_name)}</td>
                 <td>${escapeHtml(s.year_group || '')}</td>
+                <td>${escapeHtml(s.date_of_birth ? s.date_of_birth.slice(0, 10) : '')}</td>
                 <td><span class="badge ${s.current_status === 'active' ? '' : 'secondary'}">${escapeHtml(s.current_status || 'active')}</span></td>
               </tr>`).join('')}
             </tbody>
@@ -2135,7 +2136,7 @@ const state = {
   function smParseBulkAddText(raw) {
     return raw.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
       const parts = line.split(',').map((p) => p.trim());
-      return { studentCode: parts[0] || '', firstName: parts[1] || '', lastName: parts[2] || '', yearGroup: parts[3] || '' };
+      return { studentCode: parts[0] || '', firstName: parts[1] || '', lastName: parts[2] || '', dateOfBirth: parts[3] || '' };
     });
   }
 
@@ -2151,7 +2152,7 @@ const state = {
         studentCode: obj.student_id || obj.student_code || '',
         firstName: obj.first_name || '',
         lastName: obj.last_name || '',
-        yearGroup: obj.year_group || '',
+        dateOfBirth: obj.date_of_birth || obj.dob || '',
       };
     }).filter((r) => r.studentCode);
   }
@@ -2626,7 +2627,7 @@ const state = {
     // CSV template download
     const smDownloadTemplate = document.getElementById('smDownloadTemplate');
     if (smDownloadTemplate) smDownloadTemplate.onclick = () => {
-      const csv = 'student_id,first_name,last_name,year_group\n';
+      const csv = 'student_id,first_name,last_name,date_of_birth\n';
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

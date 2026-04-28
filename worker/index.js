@@ -952,7 +952,7 @@ function createApi(env, actorEmail) {
     }
     const students = await query(
       [
-        'SELECT s.id, s.student_code, s.first_name, s.last_name, s.preferred_name,',
+        'SELECT s.id, s.student_code, s.first_name, s.last_name, s.preferred_name, s.date_of_birth,',
         "  CASE WHEN s.date_of_birth IS NOT NULL THEN 'Year ' || (",
         '    (EXTRACT(YEAR FROM NOW())::int - CASE WHEN EXTRACT(MONTH FROM NOW())::int < 9 THEN 1 ELSE 0 END)',
         '    - (EXTRACT(YEAR FROM s.date_of_birth)::int + CASE WHEN EXTRACT(MONTH FROM s.date_of_birth)::int >= 9 THEN 5 ELSE 4 END)',
@@ -978,7 +978,7 @@ function createApi(env, actorEmail) {
         "    EXISTS (SELECT 1 FROM concerns WHERE student_id = s.id AND deleted_at IS NULL AND status IN ('open', 'triage', 'escalated')) AS has_open_concern",
         '  ) latest ON TRUE',
         'WHERE s.deleted_at IS NULL AND ' + filterSql + ' AND ' + searchSql,
-        'GROUP BY s.id, latest.latest_activity_at, latest.open_follow_up, latest.has_open_concern',
+        'GROUP BY s.id, s.date_of_birth, latest.latest_activity_at, latest.open_follow_up, latest.has_open_concern',
         'ORDER BY s.last_name, s.first_name',
         'LIMIT 100',
       ].join('\n'),
@@ -1521,18 +1521,20 @@ function createApi(env, actorEmail) {
         results.errors.push({ studentCode: code || '(blank)', reason: 'studentCode, firstName, and lastName are required' });
         continue;
       }
+      const dob = row.dateOfBirth || row.date_of_birth || null;
+      const dobValue = dob ? dob.trim() || null : null;
       try {
         const existing = await queryOne('SELECT id FROM students WHERE student_code = $1 AND deleted_at IS NULL', [code]);
         if (existing) {
           await queryOne(
-            'UPDATE students SET first_name=$1, last_name=$2, year_group=COALESCE($3, year_group), tutor_group=COALESCE($4, tutor_group), updated_at=NOW(), updated_by=$5 WHERE id=$6 RETURNING id',
-            [firstName, lastName, row.yearGroup || row.year_group || null, row.tutorGroup || row.tutor_group || null, auth.userId, existing.id]
+            'UPDATE students SET first_name=$1, last_name=$2, date_of_birth=COALESCE($3::date, date_of_birth), updated_at=NOW(), updated_by=$4 WHERE id=$5 RETURNING id',
+            [firstName, lastName, dobValue, auth.userId, existing.id]
           );
           results.updated++;
         } else {
           await queryOne(
-            'INSERT INTO students (student_code, first_name, last_name, year_group, tutor_group, current_status, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) RETURNING id',
-            [code, firstName, lastName, row.yearGroup || row.year_group || null, row.tutorGroup || row.tutor_group || null, 'active', auth.userId]
+            'INSERT INTO students (student_code, first_name, last_name, date_of_birth, current_status, created_by, updated_by) VALUES ($1,$2,$3,$4::date,$5,$6,$6) RETURNING id',
+            [code, firstName, lastName, dobValue, 'active', auth.userId]
           );
           results.created++;
         }
