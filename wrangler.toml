@@ -1,7 +1,7 @@
-name = "al-hikmah-wellbeing-api"
+name = "alhikmah-wellbeing"
 main = "worker/index.built.js"
 compatibility_date = "2026-04-24"
-account_id = "a6574a97fa2af626488c61e14a73c8fe"
+account_id = "30725c140e222702faabf32aab54acbd"
 
 [observability]
 enabled = true
