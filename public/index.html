@@ -2000,40 +2000,39 @@ const state = {
           <div><p class="eyebrow">Settings</p><h3 class="section-title">Student Management</h3></div>
         </div>
 
-        <!-- Filter / search bar -->
-        <div class="filter-row" style="margin-bottom:12px">
-          <input id="smFilterCode" placeholder="Student ID (e.g. 24*)" style="width:150px">
-          <input id="smFilterName" placeholder="Name search" style="width:150px">
-          <input id="smFilterYear" placeholder="Year group" style="width:110px">
-          <select id="smFilterStatus" style="width:130px">
-            <option value="">Any status</option>
-            <option value="active">Active</option>
-            <option value="monitoring">Monitoring</option>
-            <option value="closed">Closed</option>
-            <option value="inactive">Inactive</option>
-          </select>
-          <button class="button" id="smApplyFilter">Search</button>
-        </div>
-
-        <!-- Student list (collapsed by default) -->
-        <div style="margin-bottom:12px">
-          <button class="button secondary" id="smToggleList">Show current students</button>
-        </div>
-        <div id="smStudentListWrap" class="hidden" style="margin-bottom:16px">
-          <div id="smStudentList"></div>
-        </div>
-
-        <!-- Bulk status change -->
-        <div id="smBulkBar" class="toolbar hidden" style="margin-bottom:16px;padding:10px 14px;background:var(--surface-mid);border-radius:10px">
-          <span id="smBulkCount" class="muted small"></span>
-          <select id="smBulkStatus" style="width:auto">
-            <option value="active">Set Active</option>
-            <option value="monitoring">Set Monitoring</option>
-            <option value="closed">Set Closed</option>
-            <option value="inactive">Set Inactive</option>
-          </select>
-          <button class="button" id="smBulkApply">Apply to selected</button>
-          <button class="button secondary" id="smBulkClear">Clear selection</button>
+        <!-- Current students subpanel -->
+        <div style="background:var(--surface-mid);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <p class="eyebrow" style="margin:0">Current students</p>
+            <button class="button secondary" id="smToggleList">Show</button>
+          </div>
+          <div id="smStudentListWrap" class="hidden">
+            <div class="filter-row" style="margin-top:12px;margin-bottom:10px">
+              <input id="smFilterCode" placeholder="Student ID (e.g. 24*)" style="width:150px">
+              <input id="smFilterName" placeholder="Name search" style="width:150px">
+              <input id="smFilterYear" placeholder="Year group" style="width:110px">
+              <select id="smFilterStatus" style="width:130px">
+                <option value="">Any status</option>
+                <option value="active">Active</option>
+                <option value="monitoring">Monitoring</option>
+                <option value="closed">Closed</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <button class="button" id="smApplyFilter">Search</button>
+            </div>
+            <div id="smStudentList"></div>
+            <div id="smBulkBar" class="toolbar hidden" style="margin-top:10px;padding:10px 14px;background:var(--surface);border-radius:10px">
+              <span id="smBulkCount" class="muted small"></span>
+              <select id="smBulkStatus" style="width:auto">
+                <option value="active">Set Active</option>
+                <option value="monitoring">Set Monitoring</option>
+                <option value="closed">Set Closed</option>
+                <option value="inactive">Set Inactive</option>
+              </select>
+              <button class="button" id="smBulkApply">Apply to selected</button>
+              <button class="button secondary" id="smBulkClear">Clear selection</button>
+            </div>
+          </div>
         </div>
 
         <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
@@ -2604,7 +2603,7 @@ const state = {
     const smStudentListWrap = document.getElementById('smStudentListWrap');
     if (smToggleList) smToggleList.onclick = () => {
       const hidden = smStudentListWrap.classList.toggle('hidden');
-      smToggleList.textContent = hidden ? 'Show current students' : 'Hide students';
+      smToggleList.textContent = hidden ? 'Show' : 'Hide';
       if (!hidden && !document.querySelector('.sm-student-chk')) loadStudentsManagement();
     };
 
