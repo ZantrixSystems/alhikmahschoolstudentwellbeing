@@ -1507,6 +1507,56 @@ function createApi(env, actorEmail) {
     return { student };
   }
 
+  async function importStudents(auth, body) {
+    await assertPermission(auth, 'students.manage');
+    const rows = body.students;
+    if (!Array.isArray(rows) || rows.length === 0) throw new AppError('students array is required');
+    if (rows.length > 500) throw new AppError('Maximum 500 students per import');
+    const results = { created: 0, updated: 0, errors: [] };
+    for (const row of rows) {
+      const code = (row.studentCode || row.student_code || '').trim();
+      const firstName = (row.firstName || row.first_name || '').trim();
+      const lastName = (row.lastName || row.last_name || '').trim();
+      if (!code || !firstName || !lastName) {
+        results.errors.push({ studentCode: code || '(blank)', reason: 'studentCode, firstName, and lastName are required' });
+        continue;
+      }
+      try {
+        const existing = await queryOne('SELECT id FROM students WHERE student_code = $1 AND deleted_at IS NULL', [code]);
+        if (existing) {
+          await queryOne(
+            'UPDATE students SET first_name=$1, last_name=$2, year_group=COALESCE($3, year_group), tutor_group=COALESCE($4, tutor_group), updated_at=NOW(), updated_by=$5 WHERE id=$6 RETURNING id',
+            [firstName, lastName, row.yearGroup || row.year_group || null, row.tutorGroup || row.tutor_group || null, auth.userId, existing.id]
+          );
+          results.updated++;
+        } else {
+          await queryOne(
+            'INSERT INTO students (student_code, first_name, last_name, year_group, tutor_group, current_status, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) RETURNING id',
+            [code, firstName, lastName, row.yearGroup || row.year_group || null, row.tutorGroup || row.tutor_group || null, 'active', auth.userId]
+          );
+          results.created++;
+        }
+      } catch (err) {
+        results.errors.push({ studentCode: code, reason: err.message });
+      }
+    }
+    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'import', entityType: 'student', entityId: null });
+    return { results };
+  }
+
+  async function bulkUpdateStudentStatus(auth, body) {
+    await assertPermission(auth, 'students.manage');
+    const { studentIds, status } = body;
+    if (!Array.isArray(studentIds) || studentIds.length === 0) throw new AppError('studentIds array is required');
+    if (!['active', 'monitoring', 'closed', 'inactive'].includes(status)) throw new AppError('Invalid status');
+    await query(
+      `UPDATE students SET current_status=$1, updated_at=NOW(), updated_by=$2 WHERE id = ANY($3::uuid[]) AND deleted_at IS NULL`,
+      [status, auth.userId, studentIds]
+    );
+    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'bulk_status', entityType: 'student', entityId: null });
+    return { ok: true, count: studentIds.length };
+  }
+
   async function addRadar(auth, body) {
     await assertPermission(auth, 'radar.manage');
     if (!body.studentId || !body.teamId || !body.summary) throw new AppError('studentId, teamId, and summary are required');
@@ -1888,6 +1938,8 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/follow-ups') return createFollowUp(auth, payload);
     if (method === 'post' && path === '/api/radar') return addRadar(auth, payload);
     if (method === 'post' && path === '/api/students/status') return updateStudentStatus(auth, payload);
+    if (method === 'post' && path === '/api/students/import') return importStudents(auth, payload);
+    if (method === 'post' && path === '/api/students/bulk-status') return bulkUpdateStudentStatus(auth, payload);
     if (method === 'post' && /^\/api\/students\/[^/]+\/delete$/.test(path)) return deleteStudent(auth, path.split('/')[3]);
     if (method === 'get' && path === '/api/settings/reference') return getSettingsReferencePayload(auth);
     if (method === 'post' && path === '/api/settings/users') return saveUser(auth, payload);

@@ -1029,16 +1029,7 @@ const state = {
               <button class="button ${!isAdvanced ? '' : 'secondary'}" id="builderModeButton">Builder</button>
               <button class="button ${isAdvanced ? '' : 'secondary'}" id="advancedModeButton">Advanced</button>
             </div>
-            ${hasPermission('students.manage') ? '<button class="button" id="newStudentToggle">Add student</button>' : ''}
           </div>
-        </div>
-        <div id="newStudentForm" class="inline-form hidden" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:8px">
-          <p class="eyebrow" style="margin-bottom:8px">Find student</p>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="directorySearch" class="search-input" placeholder="Type name or student ID…" style="flex:1;border-radius:8px" autocomplete="off">
-            <button class="button secondary" id="cancelNewStudent" style="white-space:nowrap">Cancel</button>
-          </div>
-          <div id="directoryResults" style="margin-top:8px;border-radius:8px;overflow:hidden"></div>
         </div>
         <div class="student-filter-shell">
         <div id="builderFilters" class="filter-builder ${isAdvanced ? 'hidden' : ''}">
@@ -1072,76 +1063,6 @@ const state = {
       </section>
     `;
 
-    const toggle = document.getElementById('newStudentToggle');
-    const newStudentForm = document.getElementById('newStudentForm');
-    if (toggle) toggle.onclick = () => {
-      newStudentForm.classList.remove('hidden');
-      toggle.classList.add('hidden');
-      const dirSearch = document.getElementById('directorySearch');
-      if (dirSearch) dirSearch.focus();
-      // Load directory on first open — fetch all students from DB
-      if (!state.directoryCache) {
-        document.getElementById('directoryResults').innerHTML = '<p class="muted small" style="padding:8px 12px">Loading…</p>';
-        callServer({ path: '/api/students', method: 'get', query: { q: '', filter: '' } }).then((data) => {
-          state.directoryCache = (data.students || []).map((s) => ({
-            studentCode: s.student_code,
-            firstName: s.first_name,
-            lastName: s.last_name,
-            id: s.id,
-          }));
-          document.getElementById('directoryResults').innerHTML = '';
-        }).catch(() => showMessage('Could not load student directory.', 'error'));
-      }
-    };
-    const cancelNewStudent = document.getElementById('cancelNewStudent');
-    if (cancelNewStudent) cancelNewStudent.onclick = () => {
-      newStudentForm.classList.add('hidden');
-      if (toggle) toggle.classList.remove('hidden');
-      document.getElementById('directoryResults').innerHTML = '';
-      document.getElementById('directorySearch').value = '';
-    };
-    const dirSearch = document.getElementById('directorySearch');
-    if (dirSearch) dirSearch.oninput = () => {
-      const q = dirSearch.value.trim().toLowerCase();
-      const results = document.getElementById('directoryResults');
-      if (!q) { results.innerHTML = ''; return; }
-      const dir = state.directoryCache || [];
-      if (!dir.length) { results.innerHTML = '<p class="muted small" style="padding:8px 12px">Directory still loading…</p>'; return; }
-      const matches = dir.filter((s) =>
-        (s.firstName + ' ' + s.lastName).toLowerCase().includes(q) || s.studentCode.toLowerCase().includes(q)
-      ).slice(0, 8);
-      if (!matches.length) { results.innerHTML = '<p class="muted small" style="padding:8px 12px">No students found matching that name or ID.</p>'; return; }
-      results.innerHTML = matches.map((s) => `
-        <div class="directory-result" data-student-id="${escapeHtml(s.id || '')}" data-student-code="${escapeHtml(s.studentCode)}" data-first="${escapeHtml(s.firstName)}" data-last="${escapeHtml(s.lastName)}"
-          style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);transition:background 0.1s">
-          <span>
-            <strong>${escapeHtml(s.firstName)} ${escapeHtml(s.lastName)}</strong>
-            <span class="muted small" style="margin-left:8px">${escapeHtml(s.studentCode)}</span>
-          </span>
-          <span class="badge" style="background:var(--sage);color:#fff;border-radius:6px;padding:2px 10px;font-size:12px">Select</span>
-        </div>`).join('');
-      results.querySelectorAll('.directory-result').forEach((row) => {
-        row.onmouseenter = () => row.style.background = 'var(--surface-raised, #f5f5f5)';
-        row.onmouseleave = () => row.style.background = '';
-        row.onclick = () => {
-          const studentId = row.dataset.studentId;
-          if (studentId) {
-            newStudentForm.classList.add('hidden');
-            if (toggle) toggle.classList.remove('hidden');
-            document.getElementById('directorySearch').value = '';
-            document.getElementById('directoryResults').innerHTML = '';
-            updateRoute({ page: 'student-profile', studentId });
-          } else {
-            callServer({ path: '/api/students', method: 'post', payload: { studentCode: row.dataset.studentCode, firstName: row.dataset.first, lastName: row.dataset.last } })
-              .then((result) => {
-                newStudentForm.classList.add('hidden');
-                if (toggle) toggle.classList.remove('hidden');
-                updateRoute({ page: 'student-profile', studentId: result.student.id });
-              });
-          }
-        };
-      });
-    };
     document.getElementById('builderModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'builder' });
     document.getElementById('advancedModeButton').onclick = () => updateRoute({ page: 'students', filterMode: 'advanced' });
     document.getElementById('applyBuilderFilter').onclick = () => {
@@ -2005,7 +1926,7 @@ const state = {
     setPageTitle('Settings');
     const target = document.getElementById('settingsPage');
     const tab = state.route.settingsTab || 'users';
-    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['dropdowns', 'Dropdowns'], ['filters', 'Saved Filters'], ['audit', 'Audit Log']];
+    const tabs = [['users', 'Users'], ['roles', 'Roles'], ['teams', 'Teams'], ['visibility', 'Team Sharing'], ['dropdowns', 'Dropdowns'], ['filters', 'Saved Filters'], ['students', 'Students'], ['audit', 'Audit Log']];
 
     // Build the tab bar shell once — never destroy it so clicks always register.
     if (!target.dataset.built) {
@@ -2040,11 +1961,13 @@ const state = {
         visibility: renderVisibilitySettings(data, state.visibilityEditMode, state.visibilityPending),
         dropdowns: renderDropdownSettings(data),
         filters: renderSavedFiltersSettings(data),
+        students: renderStudentsManagementSettings(),
         audit: '<article class="panel compact-panel"><div id="auditLogTable">' + skeletonRows(8) + '</div></article>',
       };
       document.getElementById('settingsBody').outerHTML = '<div id="settingsBody">' + (bodyByTab[tab] || '') + '</div>';
       bindSettingsForms();
       if (tab === 'audit') loadAuditLog();
+      if (tab === 'students') loadStudentsManagement();
     }
 
     const cachedRef = getCached('settings:reference');
@@ -2065,6 +1988,194 @@ const state = {
         paintTab(data);
       });
     }
+  }
+
+  function renderStudentsManagementSettings() {
+    return `
+      <article class="panel compact-panel">
+        <div class="panel-header">
+          <div><p class="eyebrow">Settings</p><h3 class="section-title">Student Management</h3></div>
+        </div>
+
+        <!-- Filter / search bar -->
+        <div class="inline-form" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)" style="flex:1;min-width:140px">
+          <input id="smFilterName" class="search-input" placeholder="Name search" style="flex:1;min-width:140px">
+          <input id="smFilterYear" class="search-input" placeholder="Year group" style="width:110px">
+          <select id="smFilterStatus" style="border-radius:8px;padding:6px 10px;border:1px solid var(--border)">
+            <option value="">Any status</option>
+            <option value="active">Active</option>
+            <option value="monitoring">Monitoring</option>
+            <option value="closed">Closed</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <button class="button" id="smApplyFilter">Search</button>
+        </div>
+
+        <!-- Student list -->
+        <div id="smStudentList" style="margin-bottom:16px">${skeletonRows(6)}</div>
+
+        <!-- Bulk status change -->
+        <div id="smBulkBar" class="inline-form hidden" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+          <span id="smBulkCount" class="muted small"></span>
+          <select id="smBulkStatus" style="border-radius:8px;padding:6px 10px;border:1px solid var(--border)">
+            <option value="active">Set Active</option>
+            <option value="monitoring">Set Monitoring</option>
+            <option value="closed">Set Closed</option>
+            <option value="inactive">Set Inactive</option>
+          </select>
+          <button class="button" id="smBulkApply">Apply to selected</button>
+          <button class="button secondary" id="smBulkClear">Clear selection</button>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- Section: Add single student -->
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <p class="eyebrow">Add a single student</p>
+            <button class="text-button" id="smSingleToggle">+ Show form</button>
+          </div>
+          <div id="smSingleForm" class="inline-form hidden">
+            <div class="form-grid">
+              <input id="smSingleCode" placeholder="Student ID (required)">
+              <input id="smSingleFirst" placeholder="First name (required)">
+              <input id="smSingleLast" placeholder="Last name (required)">
+              <input id="smSingleYear" placeholder="Year group (optional)">
+              <button class="button" id="smSingleSave">Add student</button>
+              <button class="button secondary" id="smSingleCancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- Section: Add multiple students inline -->
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <p class="eyebrow">Add multiple students (paste rows)</p>
+            <button class="text-button" id="smBulkAddToggle">+ Show form</button>
+          </div>
+          <div id="smBulkAddForm" class="inline-form hidden">
+            <p class="muted small" style="margin-bottom:8px">One student per line: <strong>StudentID, First name, Last name, Year group</strong> (year group optional)</p>
+            <textarea id="smBulkAddText" rows="8" style="width:100%;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:monospace;font-size:13px;resize:vertical" placeholder="24001, Ali, Ahmed, Year 10&#10;24002, Sara, Khan, Year 9"></textarea>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="button" id="smBulkAddSave">Import rows</button>
+              <button class="button secondary" id="smBulkAddCancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+        <!-- Section: CSV import/export -->
+        <div>
+          <p class="eyebrow" style="margin-bottom:8px">CSV import / export</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="button secondary" id="smDownloadTemplate">Download CSV template</button>
+            <label class="button secondary" style="cursor:pointer;margin:0">
+              Upload CSV
+              <input type="file" id="smCsvUpload" accept=".csv" style="display:none">
+            </label>
+          </div>
+          <div id="smCsvStatus" style="margin-top:8px"></div>
+        </div>
+      </article>`;
+  }
+
+  function loadStudentsManagement(filterOverride) {
+    const codeFilter = (filterOverride && filterOverride.code !== undefined) ? filterOverride.code : (document.getElementById('smFilterCode') || {}).value || '';
+    const nameFilter = (filterOverride && filterOverride.name !== undefined) ? filterOverride.name : (document.getElementById('smFilterName') || {}).value || '';
+    const yearFilter = (filterOverride && filterOverride.year !== undefined) ? filterOverride.year : (document.getElementById('smFilterYear') || {}).value || '';
+    const statusFilter = (filterOverride && filterOverride.status !== undefined) ? filterOverride.status : (document.getElementById('smFilterStatus') || {}).value || '';
+
+    // Build a filter DSL expression from the settings filter controls
+    const parts = [];
+    if (nameFilter) parts.push('name~=' + nameFilter);
+    if (yearFilter) parts.push('yearGroup==' + yearFilter);
+    if (statusFilter) parts.push('status==' + statusFilter);
+    const filterExpr = parts.join(';');
+    const q = codeFilter;
+
+    const listEl = document.getElementById('smStudentList');
+    if (listEl) listEl.innerHTML = skeletonRows(6);
+
+    callServer({ path: '/api/students', method: 'get', query: { q, filter: filterExpr, limit: 200 } }).then((data) => {
+      const students = data.students || [];
+      const el = document.getElementById('smStudentList');
+      if (!el) return;
+      if (!students.length) { el.innerHTML = '<p class="muted small" style="padding:8px 0">No students found.</p>'; return; }
+
+      el.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <label class="check-control" style="font-size:13px"><input type="checkbox" id="smSelectAll"> Select all (${students.length})</label>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table dense-table">
+            <thead><tr><th style="width:36px"></th><th>Student ID</th><th>Name</th><th>Year</th><th>Status</th></tr></thead>
+            <tbody>${students.map((s) => `
+              <tr>
+                <td><input type="checkbox" class="sm-student-chk" data-id="${escapeHtml(s.id)}"></td>
+                <td>${escapeHtml(s.student_code)}</td>
+                <td>${escapeHtml(s.first_name)} ${escapeHtml(s.last_name)}</td>
+                <td>${escapeHtml(s.year_group || '')}</td>
+                <td><span class="badge ${s.current_status === 'active' ? '' : 'secondary'}">${escapeHtml(s.current_status || 'active')}</span></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      const selectAll = document.getElementById('smSelectAll');
+      if (selectAll) selectAll.onchange = () => {
+        document.querySelectorAll('.sm-student-chk').forEach((cb) => { cb.checked = selectAll.checked; });
+        updateSmBulkBar();
+      };
+      document.querySelectorAll('.sm-student-chk').forEach((cb) => {
+        cb.onchange = updateSmBulkBar;
+      });
+    }).catch((e) => {
+      const el = document.getElementById('smStudentList');
+      if (el) el.innerHTML = '<p class="muted small" style="color:#c0392b">Failed to load students: ' + escapeHtml(e.message) + '</p>';
+    });
+  }
+
+  function updateSmBulkBar() {
+    const checked = Array.from(document.querySelectorAll('.sm-student-chk:checked'));
+    const bar = document.getElementById('smBulkBar');
+    const count = document.getElementById('smBulkCount');
+    if (!bar) return;
+    if (checked.length > 0) {
+      bar.classList.remove('hidden');
+      bar.style.display = 'flex';
+      if (count) count.textContent = checked.length + ' student' + (checked.length !== 1 ? 's' : '') + ' selected';
+    } else {
+      bar.classList.add('hidden');
+      bar.style.display = '';
+    }
+  }
+
+  function smParseBulkAddText(raw) {
+    return raw.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+      const parts = line.split(',').map((p) => p.trim());
+      return { studentCode: parts[0] || '', firstName: parts[1] || '', lastName: parts[2] || '', yearGroup: parts[3] || '' };
+    });
+  }
+
+  function smParseCsv(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return [];
+    const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    return lines.slice(1).map((line) => {
+      const cols = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+      const obj = {};
+      header.forEach((h, i) => { obj[h] = cols[i] || ''; });
+      return {
+        studentCode: obj.student_id || obj.student_code || '',
+        firstName: obj.first_name || '',
+        lastName: obj.last_name || '',
+        yearGroup: obj.year_group || '',
+      };
+    }).filter((r) => r.studentCode);
   }
 
   function renderUsersSettings(data) {
@@ -2500,6 +2611,127 @@ const state = {
           .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage('Dropdown option deleted.'); });
       };
     });
+
+    // Students management tab bindings
+    const smApplyFilter = document.getElementById('smApplyFilter');
+    if (smApplyFilter) smApplyFilter.onclick = () => loadStudentsManagement();
+
+    // Single add toggle
+    const smSingleToggle = document.getElementById('smSingleToggle');
+    const smSingleForm = document.getElementById('smSingleForm');
+    if (smSingleToggle) smSingleToggle.onclick = () => {
+      const hidden = smSingleForm.classList.toggle('hidden');
+      smSingleToggle.textContent = hidden ? '+ Show form' : '− Hide form';
+    };
+    const smSingleCancel = document.getElementById('smSingleCancel');
+    if (smSingleCancel) smSingleCancel.onclick = () => { smSingleForm.classList.add('hidden'); smSingleToggle.textContent = '+ Show form'; };
+    const smSingleSave = document.getElementById('smSingleSave');
+    if (smSingleSave) smSingleSave.onclick = () => {
+      const code = (document.getElementById('smSingleCode').value || '').trim();
+      const first = (document.getElementById('smSingleFirst').value || '').trim();
+      const last = (document.getElementById('smSingleLast').value || '').trim();
+      const year = (document.getElementById('smSingleYear').value || '').trim();
+      if (!code || !first || !last) return showMessage('Student ID, first name, and last name are required.', 'error');
+      smSingleSave.disabled = true;
+      callServer({ path: '/api/students/import', method: 'post', payload: { students: [{ studentCode: code, firstName: first, lastName: last, yearGroup: year }] } })
+        .then((r) => {
+          smSingleSave.disabled = false;
+          document.getElementById('smSingleCode').value = '';
+          document.getElementById('smSingleFirst').value = '';
+          document.getElementById('smSingleLast').value = '';
+          document.getElementById('smSingleYear').value = '';
+          const res = r.results;
+          showMessage(res.created ? 'Student added.' : (res.updated ? 'Student updated.' : 'No changes made.'));
+          loadStudentsManagement();
+        }).catch((e) => { smSingleSave.disabled = false; showMessage('Error: ' + e.message, 'error'); });
+    };
+
+    // Bulk add rows toggle
+    const smBulkAddToggle = document.getElementById('smBulkAddToggle');
+    const smBulkAddForm = document.getElementById('smBulkAddForm');
+    if (smBulkAddToggle) smBulkAddToggle.onclick = () => {
+      const hidden = smBulkAddForm.classList.toggle('hidden');
+      smBulkAddToggle.textContent = hidden ? '+ Show form' : '− Hide form';
+    };
+    const smBulkAddCancel = document.getElementById('smBulkAddCancel');
+    if (smBulkAddCancel) smBulkAddCancel.onclick = () => { smBulkAddForm.classList.add('hidden'); smBulkAddToggle.textContent = '+ Show form'; };
+    const smBulkAddSave = document.getElementById('smBulkAddSave');
+    if (smBulkAddSave) smBulkAddSave.onclick = () => {
+      const raw = (document.getElementById('smBulkAddText').value || '').trim();
+      if (!raw) return showMessage('Please enter at least one row.', 'error');
+      const students = smParseBulkAddText(raw);
+      if (!students.length) return showMessage('No valid rows found.', 'error');
+      smBulkAddSave.disabled = true;
+      callServer({ path: '/api/students/import', method: 'post', payload: { students } })
+        .then((r) => {
+          smBulkAddSave.disabled = false;
+          const res = r.results;
+          const msg = `Done: ${res.created} created, ${res.updated} updated` + (res.errors.length ? `, ${res.errors.length} error(s): ` + res.errors.map((e) => e.studentCode + ' (' + e.reason + ')').join('; ') : '');
+          showMessage(msg, res.errors.length ? 'error' : 'success');
+          document.getElementById('smBulkAddText').value = '';
+          smBulkAddForm.classList.add('hidden');
+          smBulkAddToggle.textContent = '+ Show form';
+          loadStudentsManagement();
+        }).catch((e) => { smBulkAddSave.disabled = false; showMessage('Import failed: ' + e.message, 'error'); });
+    };
+
+    // CSV template download
+    const smDownloadTemplate = document.getElementById('smDownloadTemplate');
+    if (smDownloadTemplate) smDownloadTemplate.onclick = () => {
+      const csv = 'student_id,first_name,last_name,year_group\n';
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'students_template.csv'; a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    // CSV upload
+    const smCsvUpload = document.getElementById('smCsvUpload');
+    if (smCsvUpload) smCsvUpload.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const students = smParseCsv(ev.target.result || '');
+        if (!students.length) return showMessage('No valid rows found in CSV.', 'error');
+        const statusEl = document.getElementById('smCsvStatus');
+        if (statusEl) statusEl.innerHTML = '<p class="muted small">Importing ' + students.length + ' rows…</p>';
+        callServer({ path: '/api/students/import', method: 'post', payload: { students } })
+          .then((r) => {
+            const res = r.results;
+            const msg = `Done: ${res.created} created, ${res.updated} updated` + (res.errors.length ? `, ${res.errors.length} error(s): ` + res.errors.map((err) => err.studentCode + ' (' + err.reason + ')').join('; ') : '');
+            if (statusEl) statusEl.innerHTML = '<p class="muted small">' + escapeHtml(msg) + '</p>';
+            showMessage('CSV import complete.', res.errors.length ? 'error' : 'success');
+            loadStudentsManagement();
+          }).catch((err) => {
+            if (statusEl) statusEl.innerHTML = '';
+            showMessage('CSV import failed: ' + err.message, 'error');
+          });
+        smCsvUpload.value = '';
+      };
+      reader.readAsText(file);
+    };
+
+    // Bulk status change
+    const smBulkApply = document.getElementById('smBulkApply');
+    if (smBulkApply) smBulkApply.onclick = () => {
+      const checked = Array.from(document.querySelectorAll('.sm-student-chk:checked'));
+      if (!checked.length) return;
+      const status = document.getElementById('smBulkStatus').value;
+      const studentIds = checked.map((cb) => cb.dataset.id);
+      smBulkApply.disabled = true;
+      callServer({ path: '/api/students/bulk-status', method: 'post', payload: { studentIds, status } })
+        .then(() => { smBulkApply.disabled = false; showMessage('Status updated for ' + studentIds.length + ' student(s).'); loadStudentsManagement(); })
+        .catch((e) => { smBulkApply.disabled = false; showMessage('Error: ' + e.message, 'error'); });
+    };
+    const smBulkClear = document.getElementById('smBulkClear');
+    if (smBulkClear) smBulkClear.onclick = () => {
+      document.querySelectorAll('.sm-student-chk').forEach((cb) => { cb.checked = false; });
+      const selectAll = document.getElementById('smSelectAll');
+      if (selectAll) selectAll.checked = false;
+      updateSmBulkBar();
+    };
   }
 
   function loadAuditLog() {
