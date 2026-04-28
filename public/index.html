@@ -2030,26 +2030,6 @@ const state = {
 
         <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
-        <!-- Section: Add single student -->
-        <div style="margin-bottom:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <p class="eyebrow">Add a single student</p>
-            <button class="text-button" id="smSingleToggle">+ Show form</button>
-          </div>
-          <div id="smSingleForm" class="inline-form hidden">
-            <div class="form-grid">
-              <input id="smSingleCode" placeholder="Student ID (required)">
-              <input id="smSingleFirst" placeholder="First name (required)">
-              <input id="smSingleLast" placeholder="Last name (required)">
-              <input id="smSingleYear" placeholder="Year group (optional)">
-              <button class="button" id="smSingleSave">Add student</button>
-              <button class="button secondary" id="smSingleCancel">Cancel</button>
-            </div>
-          </div>
-        </div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
-
         <!-- Section: Add multiple students inline -->
         <div style="margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -2614,36 +2594,6 @@ const state = {
     const smApplyFilter = document.getElementById('smApplyFilter');
     if (smApplyFilter) smApplyFilter.onclick = () => loadStudentsManagement();
 
-    // Single add toggle
-    const smSingleToggle = document.getElementById('smSingleToggle');
-    const smSingleForm = document.getElementById('smSingleForm');
-    if (smSingleToggle) smSingleToggle.onclick = () => {
-      const hidden = smSingleForm.classList.toggle('hidden');
-      smSingleToggle.textContent = hidden ? '+ Show form' : '− Hide form';
-    };
-    const smSingleCancel = document.getElementById('smSingleCancel');
-    if (smSingleCancel) smSingleCancel.onclick = () => { smSingleForm.classList.add('hidden'); smSingleToggle.textContent = '+ Show form'; };
-    const smSingleSave = document.getElementById('smSingleSave');
-    if (smSingleSave) smSingleSave.onclick = () => {
-      const code = (document.getElementById('smSingleCode').value || '').trim();
-      const first = (document.getElementById('smSingleFirst').value || '').trim();
-      const last = (document.getElementById('smSingleLast').value || '').trim();
-      const year = (document.getElementById('smSingleYear').value || '').trim();
-      if (!code || !first || !last) return showMessage('Student ID, first name, and last name are required.', 'error');
-      smSingleSave.disabled = true;
-      callServer({ path: '/api/students/import', method: 'post', payload: { students: [{ studentCode: code, firstName: first, lastName: last, yearGroup: year }] } })
-        .then((r) => {
-          smSingleSave.disabled = false;
-          document.getElementById('smSingleCode').value = '';
-          document.getElementById('smSingleFirst').value = '';
-          document.getElementById('smSingleLast').value = '';
-          document.getElementById('smSingleYear').value = '';
-          const res = r.results;
-          showMessage(res.created ? 'Student added.' : (res.updated ? 'Student updated.' : 'No changes made.'));
-          loadStudentsManagement();
-        }).catch((e) => { smSingleSave.disabled = false; showMessage('Error: ' + e.message, 'error'); });
-    };
-
     // Bulk add rows toggle
     const smBulkAddToggle = document.getElementById('smBulkAddToggle');
     const smBulkAddForm = document.getElementById('smBulkAddForm');
@@ -2718,6 +2668,7 @@ const state = {
       if (!checked.length) return;
       const status = document.getElementById('smBulkStatus').value;
       const studentIds = checked.map((cb) => cb.dataset.id);
+      if (!confirm('Set ' + studentIds.length + ' student' + (studentIds.length !== 1 ? 's' : '') + ' to "' + status + '"? This cannot be undone automatically.')) return;
       smBulkApply.disabled = true;
       callServer({ path: '/api/students/bulk-status', method: 'post', payload: { studentIds, status } })
         .then(() => { smBulkApply.disabled = false; showMessage('Status updated for ' + studentIds.length + ' student(s).'); loadStudentsManagement(); })
