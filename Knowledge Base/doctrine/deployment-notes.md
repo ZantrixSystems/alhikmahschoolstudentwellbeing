@@ -1,5 +1,20 @@
 # Deployment Notes
 
+## Automatic Worker Deployment
+
+Pushes to `main` run `.github/workflows/deploy-worker.yml`.
+
+The workflow:
+
+- installs dependencies with `npm ci`
+- runs `npm test`
+- runs `npm run check`
+- deploys the Worker with `npm run worker:deploy`
+
+The GitHub repository must have a secret named `CLOUDFLARE_API_TOKEN`.
+That token should be scoped to deploy the `alhikmah-wellbeing` Worker in the
+Cloudflare account referenced by `wrangler.toml`.
+
 ## Environments
 
 - Cloudflare Worker for the staff-facing UI and API.
