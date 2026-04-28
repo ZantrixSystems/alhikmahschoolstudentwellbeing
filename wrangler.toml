@@ -5,3 +5,6 @@ account_id = "a6574a97fa2af626488c61e14a73c8fe"
 
 [observability]
 enabled = true
+
+[vars]
+GOOGLE_CLIENT_ID = ""
