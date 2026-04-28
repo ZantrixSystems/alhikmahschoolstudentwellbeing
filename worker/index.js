@@ -392,6 +392,7 @@ function createApi(env, actorEmail) {
 
   async function getEffectivePermissionKeys(auth) {
     if (auth.isAdmin) return ['*'];
+    if (auth._permissionKeys) return auth._permissionKeys;
     const rows = await query(
       [
         'SELECT DISTINCT p.permission_key',
@@ -403,23 +404,14 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       [auth.userId]
     );
-    return rows.map((row) => row.permission_key);
+    auth._permissionKeys = rows.map((row) => row.permission_key);
+    return auth._permissionKeys;
   }
 
   async function assertPermission(auth, permissionKey) {
     if (auth.isAdmin) return;
-    const row = await queryOne(
-      [
-        'SELECT 1',
-        'FROM user_roles ur',
-        'JOIN role_permissions rp ON rp.role_id = ur.role_id',
-        'JOIN permissions p ON p.id = rp.permission_id',
-        'WHERE ur.user_id = $1 AND p.permission_key = $2',
-        'LIMIT 1',
-      ].join('\n'),
-      [auth.userId, permissionKey]
-    );
-    if (!row) throw new AppError('Missing permission: ' + permissionKey, 403);
+    const keys = await getEffectivePermissionKeys(auth);
+    if (!keys.includes(permissionKey)) throw new AppError('Missing permission: ' + permissionKey, 403);
   }
 
   // Returns true if the user's teams have any visibility relationship with the student.
@@ -1060,7 +1052,7 @@ function createApi(env, actorEmail) {
     );
     const canManageSend = auth.isAdmin || permissionKeys.includes('send.manage');
 
-    const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw, activeSendPlan] = await Promise.all([
+    const [concernsRaw, meetingsRaw, actionsRaw, notesRaw, chronologyRaw, activeSendPlan, linkedActions, linkedNotes] = await Promise.all([
       canReviewConcerns ? query(
         [
           'SELECT c.id, c.title, c.summary, c.detail,',
@@ -1146,38 +1138,32 @@ function createApi(env, actorEmail) {
           "WHERE sp.student_id = $1 AND sp.deleted_at IS NULL AND sp.status IN ('active','under_review')",
           'ORDER BY sp.created_at DESC LIMIT 1',
         ].join('\n'), [studentId]) : null,
+      canManageActions ? query(
+        [
+          'SELECT a.id, a.concern_id, a.title, a.summary, a.status, a.priority, a.due_at, a.created_at,',
+          '  COALESCE(ARRAY_AGG(DISTINCT at2.team_id) FILTER (WHERE at2.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+          'FROM actions a',
+          'LEFT JOIN action_teams at2 ON at2.action_id = a.id',
+          'LEFT JOIN teams t ON t.id = at2.team_id',
+          'WHERE a.student_id = $1 AND a.concern_id IS NOT NULL AND a.deleted_at IS NULL',
+          'GROUP BY a.id',
+          'ORDER BY a.created_at DESC',
+        ].join('\n'), [studentId]) : [],
+      canViewNotes ? query(
+        [
+          'SELECT n.id, n.concern_id, n.summary AS title, n.summary, n.body, n.created_at,',
+          '  COALESCE(ARRAY_AGG(DISTINCT nt.team_id) FILTER (WHERE nt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
+          '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
+          'FROM notes n',
+          'LEFT JOIN note_teams nt ON nt.note_id = n.id',
+          'LEFT JOIN teams t ON t.id = nt.team_id',
+          'WHERE n.student_id = $1 AND n.concern_id IS NOT NULL AND n.deleted_at IS NULL',
+          'GROUP BY n.id',
+          'ORDER BY n.created_at DESC',
+        ].join('\n'), [studentId]) : [],
     ]);
-    // Attach linked follow-ups (actions with concern_id) to each concern
-    const linkedActions = canManageActions ? await query(
-      [
-        'SELECT a.id, a.concern_id, a.title, a.summary, a.status, a.priority, a.due_at, a.created_at,',
-        '  COALESCE(ARRAY_AGG(DISTINCT at2.team_id) FILTER (WHERE at2.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
-        '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
-        'FROM actions a',
-        'LEFT JOIN action_teams at2 ON at2.action_id = a.id',
-        'LEFT JOIN teams t ON t.id = at2.team_id',
-        'WHERE a.student_id = $1 AND a.concern_id IS NOT NULL AND a.deleted_at IS NULL',
-        'GROUP BY a.id',
-        'ORDER BY a.created_at DESC',
-      ].join('\n'),
-      [studentId]
-    ) : [];
     concernsRaw.forEach(c => { c.linkedFollowUps = linkedActions.filter(a => a.concern_id === c.id); });
-
-    const linkedNotes = canViewNotes ? await query(
-      [
-        'SELECT n.id, n.concern_id, n.summary AS title, n.summary, n.body, n.created_at,',
-        '  COALESCE(ARRAY_AGG(DISTINCT nt.team_id) FILTER (WHERE nt.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids,',
-        '  COALESCE(ARRAY_AGG(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), ARRAY[]::text[]) AS team_names',
-        'FROM notes n',
-        'LEFT JOIN note_teams nt ON nt.note_id = n.id',
-        'LEFT JOIN teams t ON t.id = nt.team_id',
-        'WHERE n.student_id = $1 AND n.concern_id IS NOT NULL AND n.deleted_at IS NULL',
-        'GROUP BY n.id',
-        'ORDER BY n.created_at DESC',
-      ].join('\n'),
-      [studentId]
-    ) : [];
     concernsRaw.forEach(c => { c.linkedNotes = linkedNotes.filter(n => n.concern_id === c.id); });
 
     // Derive radar badges from open concerns (does not replace the radar table query)
@@ -1215,8 +1201,10 @@ function createApi(env, actorEmail) {
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
       throw new AppError('Invalid referral_type: ' + referralType);
     }
-    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : null);
-    const actionTaken = await assertReferenceOption('concerns', 'action_taken', body.actionTaken !== undefined ? body.actionTaken : (body.action_taken !== undefined ? body.action_taken : null));
+    const [incidentType, actionTaken] = await Promise.all([
+      assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : null),
+      assertReferenceOption('concerns', 'action_taken', body.actionTaken !== undefined ? body.actionTaken : (body.action_taken !== undefined ? body.action_taken : null)),
+    ]);
 
     let teamIds;
     if (body.teamIds !== undefined) {

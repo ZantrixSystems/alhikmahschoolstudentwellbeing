@@ -992,7 +992,8 @@ const state = {
 
     if (cached) {
       paintDashboard(cached);
-      callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard).catch(() => {});
+      const cacheAge = Date.now() - (state.pageCache['dashboard'] || {}).ts;
+      if (cacheAge > 60000) callServer({ path: '/api/dashboard', method: 'get' }).then(paintDashboard).catch(() => {});
     } else {
       callServer({ path: '/api/dashboard', method: 'get' }).then((data) => {
         paintDashboard(data);
@@ -2012,8 +2013,13 @@ const state = {
           <button class="button" id="smApplyFilter">Search</button>
         </div>
 
-        <!-- Student list -->
-        <div id="smStudentList" style="margin-bottom:16px">${skeletonRows(6)}</div>
+        <!-- Student list (collapsed by default) -->
+        <div style="margin-bottom:12px">
+          <button class="button secondary" id="smToggleList">Show current students</button>
+        </div>
+        <div id="smStudentListWrap" class="hidden" style="margin-bottom:16px">
+          <div id="smStudentList"></div>
+        </div>
 
         <!-- Bulk status change -->
         <div id="smBulkBar" class="toolbar hidden" style="margin-bottom:16px;padding:10px 14px;background:var(--surface-mid);border-radius:10px">
@@ -2075,6 +2081,8 @@ const state = {
     const filterExpr = parts.join(';');
     const q = codeFilter;
 
+    const wrap = document.getElementById('smStudentListWrap');
+    if (wrap) wrap.classList.remove('hidden');
     const listEl = document.getElementById('smStudentList');
     if (listEl) listEl.innerHTML = skeletonRows(6);
 
@@ -2590,6 +2598,14 @@ const state = {
     });
 
     // Students management tab bindings
+    const smToggleList = document.getElementById('smToggleList');
+    const smStudentListWrap = document.getElementById('smStudentListWrap');
+    if (smToggleList) smToggleList.onclick = () => {
+      const hidden = smStudentListWrap.classList.toggle('hidden');
+      smToggleList.textContent = hidden ? 'Show current students' : 'Hide student list';
+      if (!hidden && !document.querySelector('.sm-student-chk')) loadStudentsManagement();
+    };
+
     const smApplyFilter = document.getElementById('smApplyFilter');
     if (smApplyFilter) smApplyFilter.onclick = () => loadStudentsManagement();
 
