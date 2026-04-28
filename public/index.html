@@ -1998,11 +1998,11 @@ const state = {
         </div>
 
         <!-- Filter / search bar -->
-        <div class="toolbar" style="margin-bottom:12px">
-          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)">
-          <input id="smFilterName" class="search-input" placeholder="Name search">
-          <input id="smFilterYear" placeholder="Year group" style="width:110px">
-          <select id="smFilterStatus">
+        <div class="toolbar" style="margin-bottom:12px;flex-wrap:nowrap">
+          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)" style="min-width:0;flex:1">
+          <input id="smFilterName" class="search-input" placeholder="Name search" style="min-width:0;flex:1">
+          <input id="smFilterYear" placeholder="Year group" style="min-width:0;width:100px;flex-shrink:1">
+          <select id="smFilterStatus" style="flex-shrink:0">
             <option value="">Any status</option>
             <option value="active">Active</option>
             <option value="monitoring">Monitoring</option>
