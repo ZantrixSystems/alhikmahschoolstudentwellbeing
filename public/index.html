@@ -227,6 +227,9 @@
   }
   .toolbar input.filter-input { min-width: 280px; flex: 1 1 320px; }
   .toolbar input.search-input { min-width: 220px; flex: 1 1 220px; }
+  .filter-row { display:flex; gap:8px; }
+  .filter-row input, .filter-row select { background:var(--surface-mid); border:0; border-radius:10px; padding:8px 10px; font:inherit; color:var(--ink); box-shadow:inset 0 1px 2px rgba(27,28,25,0.03); }
+  .filter-row input:focus, .filter-row select:focus { outline:none; box-shadow:inset 0 -2px 0 var(--gold-bright); }
 
   .button {
     border: 0;
@@ -1998,11 +2001,11 @@ const state = {
         </div>
 
         <!-- Filter / search bar -->
-        <div class="toolbar" style="margin-bottom:12px;flex-wrap:nowrap">
-          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)" style="min-width:0;flex:1">
-          <input id="smFilterName" class="search-input" placeholder="Name search" style="min-width:0;flex:1">
-          <input id="smFilterYear" placeholder="Year group" style="min-width:0;width:100px;flex-shrink:1">
-          <select id="smFilterStatus" style="flex-shrink:0">
+        <div class="filter-row" style="margin-bottom:12px">
+          <input id="smFilterCode" placeholder="Student ID (e.g. 24*)" style="width:150px">
+          <input id="smFilterName" placeholder="Name search" style="width:150px">
+          <input id="smFilterYear" placeholder="Year group" style="width:110px">
+          <select id="smFilterStatus" style="width:130px">
             <option value="">Any status</option>
             <option value="active">Active</option>
             <option value="monitoring">Monitoring</option>
