@@ -2032,11 +2032,9 @@ const state = {
 
         <!-- Section: Add multiple students inline -->
         <div style="margin-bottom:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <p class="eyebrow">Add multiple students (paste rows)</p>
-            <button class="text-button" id="smBulkAddToggle">+ Show form</button>
-          </div>
-          <div id="smBulkAddForm" class="inline-form hidden">
+          <p class="eyebrow" style="margin-bottom:8px">Add multiple students (paste rows)</p>
+          <button class="button secondary" id="smBulkAddToggle">+ Show form</button>
+          <div id="smBulkAddForm" class="inline-form hidden" style="margin-top:8px">
             <p class="muted small" style="margin-bottom:8px">One student per line: <strong>StudentID, First name, Last name, Date of birth</strong> (DOB optional, format YYYY-MM-DD — used to auto-calculate year group)</p>
             <textarea id="smBulkAddText" rows="8" style="width:100%;border-radius:8px;border:1px solid var(--border);padding:8px;font-family:monospace;font-size:13px;resize:vertical" placeholder="24001, Ali, Ahmed, 2010-09-15&#10;24002, Sara, Khan, 2011-03-22"></textarea>
             <div style="display:flex;gap:8px;margin-top:8px">
