@@ -10,6 +10,34 @@ const MANAGED_REFERENCE_FIELDS = {
   concerns: ['incident_type', 'action_taken'],
 };
 
+// JWKS cache: module-level, survives across requests within a Worker isolate.
+// Google rotates keys infrequently; 6-hour TTL is safe.
+const JWKS_CACHE = { keys: null, expiresAt: 0 };
+const JWKS_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Rate limiter: sliding-window per IP, max 120 requests per 60 seconds.
+// Module-level Map survives across requests within the same isolate.
+// Cloudflare Worker isolates are per-PoP so this is best-effort, not global.
+const RATE_LIMIT_MAP = new Map();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 120;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const timestamps = (RATE_LIMIT_MAP.get(ip) || []).filter(t => t > windowStart);
+  if (timestamps.length >= RATE_LIMIT_MAX) return false;
+  timestamps.push(now);
+  RATE_LIMIT_MAP.set(ip, timestamps);
+  // Evict stale entries periodically to prevent unbounded growth
+  if (RATE_LIMIT_MAP.size > 5000) {
+    for (const [key, ts] of RATE_LIMIT_MAP) {
+      if (!ts.some(t => t > windowStart)) RATE_LIMIT_MAP.delete(key);
+    }
+  }
+  return true;
+}
+
 class AppError extends Error {
   constructor(message, statusCode = 400, details = null) {
     super(message);
@@ -21,13 +49,20 @@ class AppError extends Error {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const origin = request.headers.get('Origin') || '';
 
     // CORS preflight
-    if (request.method === 'OPTIONS') return corsResponse();
+    if (request.method === 'OPTIONS') return corsResponse(env, origin);
 
-    // Health check
+    // Health check (unauthenticated, no rate limit)
     if (request.method === 'GET' && url.pathname === '/health') {
-      return addCors(json({ ok: true, service: 'al-hikmah-wellbeing-worker' }));
+      return addCors(env, origin, json({ ok: true, service: 'al-hikmah-wellbeing-worker' }));
+    }
+
+    // Rate limiting on all non-health requests
+    const clientIp = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+    if (!checkRateLimit(clientIp)) {
+      return addCors(env, origin, json({ ok: false, error: { message: 'Too many requests' } }, 429));
     }
 
     // Serve the SPA
@@ -35,53 +70,79 @@ export default {
       const html = APP_HTML.replaceAll('__GOOGLE_CLIENT_ID__', env.GOOGLE_CLIENT_ID || '');
       return new Response(html, {
         status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders() },
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders(env, origin) },
       });
     }
 
     // API routes
     if (url.pathname.startsWith('/api/')) {
+      let email = null;
       try {
-        const email = await verifyGoogleIdToken(request, env);
+        email = await verifyGoogleIdToken(request, env);
         const api = createApi(env, email);
-        const query = Object.fromEntries(url.searchParams);
+        // Load auth context once here so dispatch receives it — prevents per-handler repetition
+        const auth = await api.loadAuthContext();
+        const requestQuery = Object.fromEntries(url.searchParams);
         let payload = {};
         if (['POST', 'PUT', 'PATCH'].includes(request.method)) {
           const text = await request.text();
           try {
             payload = text ? JSON.parse(text) : {};
-          } catch (error) {
+          } catch {
             throw new AppError('Invalid JSON request body', 400);
           }
         }
-        const data = await api.dispatch({ path: url.pathname, method: request.method.toLowerCase(), query, payload });
-        return addCors(json({ ok: true, data }));
+        const data = await api.dispatch({ path: url.pathname, method: request.method.toLowerCase(), query: requestQuery, payload }, auth);
+        return addCors(env, origin, json({ ok: true, data }));
       } catch (error) {
         const status = error.statusCode || 500;
-        return addCors(json({ ok: false, error: { message: status >= 500 ? 'Server error' : error.message, details: error.details || null } }, status));
+        // Log failed auth attempts (401/403) to a lightweight audit record when possible
+        if ((status === 401 || status === 403) && email !== null) {
+          try {
+            const api = createApi(env, email);
+            await api.writeFailedAuthAudit(email, url.pathname, error.message);
+          } catch { /* best-effort */ }
+        }
+        return addCors(env, origin, json({ ok: false, error: { message: status >= 500 ? 'Server error' : error.message, details: error.details || null } }, status));
       }
     }
 
-    return addCors(json({ ok: false, error: { message: 'Not found' } }, 404));
+    return addCors(env, origin, json({ ok: false, error: { message: 'Not found' } }, 404));
   },
 };
 
-function corsHeaders() {
+function getAllowedOrigins(env) {
+  // ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
+  // Falls back to the deployed Worker's own URL pattern if not set.
+  const raw = (env && env.ALLOWED_ORIGINS) ? env.ALLOWED_ORIGINS : '';
+  const explicit = raw.split(',').map(s => s.trim()).filter(Boolean);
+  // Always allow the localhost dev origin so wrangler dev works without config
+  return explicit.length ? explicit : ['http://localhost:8787', 'http://127.0.0.1:8787'];
+}
+
+function resolveOrigin(env, requestOrigin) {
+  if (!requestOrigin) return 'null';
+  const allowed = getAllowedOrigins(env);
+  return allowed.includes(requestOrigin) ? requestOrigin : 'null';
+}
+
+function corsHeaders(env, requestOrigin) {
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': resolveOrigin(env, requestOrigin),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
   };
 }
 
-function corsResponse() {
-  return new Response(null, { status: 204, headers: corsHeaders() });
+function corsResponse(env, requestOrigin) {
+  return new Response(null, { status: 204, headers: corsHeaders(env, requestOrigin) });
 }
 
-function addCors(response) {
+function addCors(env, requestOrigin, response) {
   const r = new Response(response.body, response);
-  Object.entries(corsHeaders()).forEach(([k, v]) => r.headers.set(k, v));
+  Object.entries(corsHeaders(env, requestOrigin)).forEach(([k, v]) => r.headers.set(k, v));
   return r;
 }
 
@@ -134,10 +195,17 @@ async function verifyGoogleIdToken(request, env) {
 }
 
 async function verifyGoogleTokenSignature(token, parts, env) {
-  // Fetch Google's public keys (they're cached by Cloudflare CDN automatically)
-  const certsResp = await fetch('https://www.googleapis.com/oauth2/v3/certs');
-  if (!certsResp.ok) throw new AppError('Could not fetch Google public keys', 500);
-  const certs = await certsResp.json();
+  // Use module-level JWKS cache to avoid a Google round-trip on every request.
+  let certs;
+  if (JWKS_CACHE.keys && Date.now() < JWKS_CACHE.expiresAt) {
+    certs = { keys: JWKS_CACHE.keys };
+  } else {
+    const certsResp = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+    if (!certsResp.ok) throw new AppError('Could not fetch Google public keys', 500);
+    certs = await certsResp.json();
+    JWKS_CACHE.keys = certs.keys;
+    JWKS_CACHE.expiresAt = Date.now() + JWKS_TTL_MS;
+  }
 
   let header;
   try {
@@ -258,7 +326,12 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       [actorEmail]
     );
-    if (!row || !row.is_active) throw new AppError('User is not authorised for this app', 403);
+    if (!row) throw new AppError('Your account is not registered for this app. Please contact your administrator.', 403);
+    if (!row.is_active) throw new AppError('Your account has been deactivated. Please contact your administrator.', 403);
+    const roleKeys = row.role_keys || [];
+    if (!roleKeys.includes('admin') && roleKeys.length === 0) {
+      throw new AppError('Your account exists but has not been assigned a role yet. Please contact your administrator.', 403);
+    }
     const teamIds = compactUnique([row.primary_team_id].concat(row.team_ids || []));
     return {
       userId: row.id,
@@ -349,6 +422,100 @@ function createApi(env, actorEmail) {
     if (!row) throw new AppError('Missing permission: ' + permissionKey, 403);
   }
 
+  // Returns true if the user's teams have any visibility relationship with the student.
+  // A student is "accessible" if:
+  //   (a) admin — always
+  //   (b) student has no team associations (unassigned student — visible to all)
+  //   (c) user is in one of the student's active concern/radar teams
+  //   (d) user's teams have a non-none visibility rule targeting a team that owns
+  //       at least one of the student's records
+  // This is used to gate CREATE and AUDIT-LOG access — not to replace the existing
+  // visibility/redaction model which still controls what fields are shown.
+  async function canAccessStudent(auth, studentId) {
+    if (auth.isAdmin) return true;
+    // Check if any of the student's records belong to the user's teams directly
+    const directRows = await query(
+      [
+        'SELECT 1 FROM (',
+        '  SELECT team_id FROM concern_teams ct JOIN concerns c ON c.id = ct.concern_id WHERE c.student_id = $1 AND c.deleted_at IS NULL',
+        '  UNION ALL',
+        '  SELECT team_id FROM meeting_teams mt JOIN meetings m ON m.id = mt.meeting_id WHERE m.student_id = $1 AND m.deleted_at IS NULL',
+        '  UNION ALL',
+        '  SELECT team_id FROM note_teams nt JOIN notes n ON n.id = nt.note_id WHERE n.student_id = $1 AND n.deleted_at IS NULL',
+        '  UNION ALL',
+        '  SELECT team_id FROM action_teams at2 JOIN actions a ON a.id = at2.action_id WHERE a.student_id = $1 AND a.deleted_at IS NULL',
+        '  UNION ALL',
+        '  SELECT team_id FROM student_team_radar WHERE student_id = $1 AND deleted_at IS NULL',
+        ') AS student_teams',
+        'WHERE team_id = ANY($2::uuid[])',
+        'LIMIT 1',
+      ].join('\n'),
+      [studentId, auth.teamIds]
+    );
+    if (directRows.length > 0) return true;
+    // Check if student has ANY team associations at all — if none, treat as shared
+    const anyTeamRows = await query(
+      [
+        'SELECT 1 FROM (',
+        '  SELECT team_id FROM concern_teams ct JOIN concerns c ON c.id = ct.concern_id WHERE c.student_id = $1 AND c.deleted_at IS NULL',
+        '  UNION ALL',
+        '  SELECT team_id FROM student_team_radar WHERE student_id = $1 AND deleted_at IS NULL',
+        ') AS student_teams LIMIT 1',
+      ].join('\n'),
+      [studentId]
+    );
+    if (anyTeamRows.length === 0) return true; // No team associations — open student
+    // Check visibility rules: user's teams have a non-none rule toward a team that owns this student
+    if (auth.teamIds.length === 0) return false;
+    const visibilityRows = await query(
+      [
+        'SELECT 1 FROM team_visibility_rules tvr',
+        'WHERE tvr.deleted_at IS NULL',
+        '  AND tvr.source_team_id = ANY($1::uuid[])',
+        "  AND tvr.visibility_level <> 'none'",
+        '  AND tvr.target_team_id IN (',
+        '    SELECT DISTINCT team_id FROM (',
+        '      SELECT team_id FROM concern_teams ct JOIN concerns c ON c.id = ct.concern_id WHERE c.student_id = $2 AND c.deleted_at IS NULL',
+        '      UNION ALL',
+        '      SELECT team_id FROM student_team_radar WHERE student_id = $2 AND deleted_at IS NULL',
+        '    ) AS student_teams',
+        '  )',
+        'LIMIT 1',
+      ].join('\n'),
+      [auth.teamIds, studentId]
+    );
+    return visibilityRows.length > 0;
+  }
+
+  // Returns true if the user is allowed to edit (not just view) a record.
+  // owner_team_id is the team that created the record.
+  // creator_user_id is the individual who created the record.
+  // Elevated override: admin role OR any role with 'concerns.override' permission (DSL).
+  function canEditRecord(auth, ownerTeamId, creatorUserId) {
+    if (auth.isAdmin) return true;
+    if (creatorUserId && creatorUserId === auth.userId) return true;
+    if (ownerTeamId && auth.teamIds.includes(ownerTeamId)) return true;
+    return false;
+  }
+
+  async function assertCanEditRecord(auth, ownerTeamId, creatorUserId, recordLabel) {
+    // Also allow users with the concerns.override permission (DSL-level override)
+    if (canEditRecord(auth, ownerTeamId, creatorUserId)) return;
+    // Check for override permission
+    const overrideRow = await queryOne(
+      [
+        'SELECT 1 FROM user_roles ur',
+        'JOIN role_permissions rp ON rp.role_id = ur.role_id',
+        'JOIN permissions p ON p.id = rp.permission_id',
+        "WHERE ur.user_id = $1 AND p.permission_key = 'concerns.override'",
+        'LIMIT 1',
+      ].join('\n'),
+      [auth.userId]
+    );
+    if (overrideRow) return;
+    throw new AppError('You do not have permission to edit this ' + (recordLabel || 'record') + ' — it belongs to another team', 403);
+  }
+
   async function writeAuditLog(auth, payload) {
     await query(
       [
@@ -371,6 +538,12 @@ function createApi(env, actorEmail) {
   function pushParam(params, value) {
     params.push(value);
     return '$' + params.length;
+  }
+
+  function normaliseTeamIds(teamIds, teamId) {
+    if (Array.isArray(teamIds)) return teamIds.filter(Boolean);
+    if (teamId) return [teamId];
+    return [];
   }
 
   function normaliseValue(value) {
@@ -759,6 +932,10 @@ function createApi(env, actorEmail) {
       safeguardingConcernsQuery,
     ]);
 
+    // Audit: sensitive read — safeguarding concern list was accessed
+    if (canReviewConcerns) {
+      await writeAuditLog(auth, { areaKey: 'dashboard', actionKey: 'safeguarding.view', entityType: 'dashboard', metadata: { sensitiveRead: true, concernCount: openSafeguardingConcerns.length } });
+    }
     return { headline, teamLoad, upcomingFollowUps, openSafeguardingConcerns };
   }
 
@@ -807,6 +984,7 @@ function createApi(env, actorEmail) {
       ].join('\n'),
       params
     );
+    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'list.view', entityType: 'student_list', metadata: { filter: filterExpression, search: search || null, count: students.length } });
     return { students, filter: filterExpression };
   }
 
@@ -1030,36 +1208,53 @@ function createApi(env, actorEmail) {
     };
   }
 
-  async function createConcern(auth, body) {
-    await assertPermission(auth, 'concerns.create');
-    if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
-    const referralType = body.referralType || null;
+  // Shared validation for concern create and update: validates referral type, managed reference
+  // fields, and derives safeguarding confidentiality from the resolved team list.
+  async function resolveConcernFields(body, existingTeamIds = null) {
+    const referralType = body.referralType !== undefined ? (body.referralType || null) : null;
     if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) {
       throw new AppError('Invalid referral_type: ' + referralType);
     }
-    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType || null);
-    const actionTaken = await assertReferenceOption('concerns', 'action_taken', body.actionTaken || body.action_taken || null);
-    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
-    // Derive confidentiality from teams: if any selected team is safeguarding, apply safeguarding level.
+    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : null);
+    const actionTaken = await assertReferenceOption('concerns', 'action_taken', body.actionTaken !== undefined ? body.actionTaken : (body.action_taken !== undefined ? body.action_taken : null));
+
+    let teamIds;
+    if (body.teamIds !== undefined) {
+      teamIds = normaliseTeamIds(body.teamIds, null);
+    } else if (body.teamId !== undefined) {
+      teamIds = normaliseTeamIds(null, body.teamId);
+    } else {
+      teamIds = existingTeamIds || [];
+    }
+
     let isSafeguarding = false;
     if (teamIds.length) {
       const teamRows = await query('SELECT team_key FROM teams WHERE id = ANY($1::uuid[])', [teamIds]);
-      isSafeguarding = teamRows.some((r) => r.team_key === 'safeguarding');
+      isSafeguarding = teamRows.some(r => r.team_key === 'safeguarding');
     }
+    return { referralType, incidentType, actionTaken, teamIds, isSafeguarding };
+  }
+
+  async function createConcern(auth, body) {
+    await assertPermission(auth, 'concerns.create');
+    if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
+    if (!await canAccessStudent(auth, body.studentId)) throw new AppError('You do not have access to this student', 403);
+    const { referralType, incidentType, actionTaken, teamIds, isSafeguarding } = await resolveConcernFields(body);
+    const ownerTeamId = teamIds[0] || auth.teamIds[0] || null;
     const requestedConfidentiality = body.confidentialityLevel || 'summary';
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
     const derivedCategory = isSafeguarding ? 'safeguarding' : 'wellbeing';
     const concern = await queryOne(
       [
         'INSERT INTO concerns',
-        '  (student_id, concern_ref, submitted_by_user_id, category, severity, urgency,',
+        '  (student_id, concern_ref, submitted_by_user_id, owner_team_id, category, severity, urgency,',
         '   confidentiality_level, title, summary, detail, referral_type, referral_date, referral_outcome,',
         '   incident_type, action_taken, action_note, behaviour_plan_active,',
         '   created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $3, $3) RETURNING *',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $3, $3) RETURNING *',
       ].join('\n'),
       [
-        body.studentId, 'CON-' + Date.now(), auth.userId,
+        body.studentId, 'CON-' + Date.now(), auth.userId, ownerTeamId,
         derivedCategory, body.severity || 'medium', body.urgency || 'standard', confidentialityLevel,
         body.title, body.summary, body.detail || null,
         referralType, body.referralDate || null, body.referralOutcome || null,
@@ -1127,27 +1322,23 @@ function createApi(env, actorEmail) {
     const existing = await queryOne('SELECT * FROM concerns WHERE id = $1 AND deleted_at IS NULL', [concernId]);
     if (!existing) throw new AppError('Concern not found', 404);
     if (existing.status === 'closed') throw new AppError('Closed concerns cannot be edited', 400);
+    await assertCanEditRecord(auth, existing.owner_team_id, existing.submitted_by_user_id, 'concern');
 
-    const referralType = body.referralType !== undefined ? body.referralType : existing.referral_type;
-    if (referralType && !VALID_REFERRAL_TYPES.includes(referralType)) throw new AppError('Invalid referral_type: ' + referralType);
-    const incidentType = await assertReferenceOption('concerns', 'incident_type', body.incidentType !== undefined ? body.incidentType : existing.incident_type);
-    const submittedActionTaken = body.actionTaken !== undefined ? body.actionTaken : body.action_taken;
-    const actionTaken = await assertReferenceOption('concerns', 'action_taken', submittedActionTaken !== undefined ? submittedActionTaken : existing.action_taken);
-    // Resolve new team list: if body provides teamIds/teamId use that, otherwise keep existing
-    let teamIds;
-    if (body.teamIds !== undefined) {
-      teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamIds ? [body.teamIds] : []);
-    } else if (body.teamId !== undefined) {
-      teamIds = body.teamId ? [body.teamId] : [];
-    } else {
+    // Resolve existing teams if body doesn't supply them, so resolveConcernFields can use them
+    let existingTeamIds = null;
+    if (body.teamIds === undefined && body.teamId === undefined) {
       const existingTeams = await query('SELECT team_id FROM concern_teams WHERE concern_id = $1', [concernId]);
-      teamIds = existingTeams.map((r) => r.team_id);
+      existingTeamIds = existingTeams.map(r => r.team_id);
     }
-    let isSafeguarding = false;
-    if (teamIds.length) {
-      const teamRows = await query('SELECT team_key FROM teams WHERE id = ANY($1::uuid[])', [teamIds]);
-      isSafeguarding = teamRows.some((r) => r.team_key === 'safeguarding');
-    }
+    // Merge body with existing values for fields not provided
+    const mergedBody = {
+      referralType: body.referralType !== undefined ? body.referralType : existing.referral_type,
+      incidentType: body.incidentType !== undefined ? body.incidentType : existing.incident_type,
+      actionTaken: body.actionTaken !== undefined ? body.actionTaken : (body.action_taken !== undefined ? body.action_taken : existing.action_taken),
+      teamIds: body.teamIds,
+      teamId: body.teamId,
+    };
+    const { referralType, incidentType, actionTaken, teamIds, isSafeguarding } = await resolveConcernFields(mergedBody, existingTeamIds);
     const requestedConfidentiality = body.confidentialityLevel !== undefined ? (body.confidentialityLevel || 'summary') : (existing.confidentiality_level || 'summary');
     const confidentialityLevel = isSafeguarding ? 'safeguarding' : (requestedConfidentiality === 'safeguarding' ? 'summary' : requestedConfidentiality);
     const derivedCategory = isSafeguarding ? 'safeguarding' : (existing.category === 'safeguarding' ? 'wellbeing' : existing.category);
@@ -1233,17 +1424,19 @@ function createApi(env, actorEmail) {
   async function createMeeting(auth, body) {
     await assertPermission(auth, 'meetings.create');
     if (!body.studentId || !body.interactionType || !body.title || !body.summary || !body.occurredAt) throw new AppError('studentId, interactionType, title, summary, and occurredAt are required');
-    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
+    if (!await canAccessStudent(auth, body.studentId)) throw new AppError('You do not have access to this student', 403);
+    const teamIds = normaliseTeamIds(body.teamIds, body.teamId);
+    const meetingOwnerTeamId = teamIds[0] || auth.teamIds[0] || null;
     const meeting = await queryOne(
       [
         'INSERT INTO meetings',
-        '  (student_id, logged_by_user_id, interaction_type, visibility_level, confidentiality_level,',
+        '  (student_id, logged_by_user_id, owner_team_id, interaction_type, visibility_level, confidentiality_level,',
         '   title, summary, detail, occurred_at, external_agency, external_contact_name, external_ref,',
         '   created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $2, $2) RETURNING *',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $2, $2) RETURNING *',
       ].join('\n'),
       [
-        body.studentId, auth.userId,
+        body.studentId, auth.userId, meetingOwnerTeamId,
         body.interactionType, body.visibilityLevel || 'summary', body.confidentialityLevel || 'summary',
         body.title, body.summary, body.detail || null, body.occurredAt,
         body.externalAgency || null, body.externalContactName || null, body.externalRef || null,
@@ -1263,13 +1456,15 @@ function createApi(env, actorEmail) {
   async function createNote(auth, body) {
     await assertPermission(auth, 'notes.create');
     if (!body.studentId || !body.summary || !body.body) throw new AppError('studentId, summary, and body are required');
-    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
+    if (!await canAccessStudent(auth, body.studentId)) throw new AppError('You do not have access to this student', 403);
+    const teamIds = normaliseTeamIds(body.teamIds, body.teamId);
+    const noteOwnerTeamId = teamIds[0] || auth.teamIds[0] || null;
     const note = await queryOne(
       [
-        'INSERT INTO notes (student_id, author_user_id, note_type, visibility_level, confidentiality_level, summary, body, concern_id, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $2, $2) RETURNING *',
+        'INSERT INTO notes (student_id, author_user_id, owner_team_id, note_type, visibility_level, confidentiality_level, summary, body, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $2, $2) RETURNING *',
       ].join('\n'),
-      [body.studentId, auth.userId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body, body.concernId || null]
+      [body.studentId, auth.userId, noteOwnerTeamId, body.noteType || 'case_note', body.visibilityLevel || 'summary', body.confidentialityLevel || 'restricted', body.summary, body.body, body.concernId || null]
     );
     if (teamIds.length) {
       await query(
@@ -1284,13 +1479,15 @@ function createApi(env, actorEmail) {
   async function createFollowUp(auth, body) {
     await assertPermission(auth, 'actions.manage');
     if (!body.studentId || !body.title || !body.summary) throw new AppError('studentId, title, and summary are required');
-    const teamIds = Array.isArray(body.teamIds) ? body.teamIds.filter(Boolean) : (body.teamId ? [body.teamId] : []);
+    if (!await canAccessStudent(auth, body.studentId)) throw new AppError('You do not have access to this student', 403);
+    const teamIds = normaliseTeamIds(body.teamIds, body.teamId);
+    const actionOwnerTeamId = teamIds[0] || auth.teamIds[0] || null;
     const action = await queryOne(
       [
-        'INSERT INTO actions (student_id, owner_user_id, title, summary, status, priority, due_at, visibility_level, concern_id, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $2, $2) RETURNING *',
+        'INSERT INTO actions (student_id, owner_user_id, owner_team_id, title, summary, status, priority, due_at, visibility_level, concern_id, created_by, updated_by)',
+        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $2, $2) RETURNING *',
       ].join('\n'),
-      [body.studentId, body.ownerUserId || auth.userId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary', body.concernId || null]
+      [body.studentId, body.ownerUserId || auth.userId, actionOwnerTeamId, body.title, body.summary, body.status || 'open', body.priority || 'medium', body.dueAt || null, body.visibilityLevel || 'summary', body.concernId || null]
     );
     if (teamIds.length) {
       await query(
@@ -1399,7 +1596,9 @@ function createApi(env, actorEmail) {
       params.concat([auth.userId, auth.teamIds])
     );
     const matrix = await getVisibilityMatrix(auth.teamIds);
-    return { meetings: applyCalendarVisibility(auth, matrix, rows), filter: filterExpression };
+    const visibleMeetings = applyCalendarVisibility(auth, matrix, rows);
+    await writeAuditLog(auth, { areaKey: 'meetings', actionKey: 'list.view', entityType: 'meeting_list', metadata: { filter: filterExpression, count: visibleMeetings.length } });
+    return { meetings: visibleMeetings, filter: filterExpression };
   }
 
   async function getSettingsReferencePayload(auth) {
@@ -1633,14 +1832,42 @@ function createApi(env, actorEmail) {
     return { savedFilter };
   }
 
-  async function getAuditLogsPayload(auth) {
+  async function getAuditLogsPayload(auth, requestQuery) {
     await assertPermission(auth, 'audit.view');
-    const auditLogs = await query('SELECT a.id, a.area_key, a.action_key, a.entity_type, a.created_at, u.display_name AS actor_name, s.student_code, s.first_name, s.last_name FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id LEFT JOIN students s ON s.id = a.student_id ORDER BY a.created_at DESC LIMIT 100');
-    return { auditLogs };
+    const params = [];
+    const clauses = [];
+    if (requestQuery.actorId) clauses.push('a.actor_user_id = ' + pushParam(params, requestQuery.actorId));
+    if (requestQuery.areaKey) clauses.push('a.area_key = ' + pushParam(params, requestQuery.areaKey));
+    if (requestQuery.studentId) {
+      if (!await canAccessStudent(auth, requestQuery.studentId)) throw new AppError('You do not have access to this student', 403);
+      clauses.push('a.student_id = ' + pushParam(params, requestQuery.studentId));
+    }
+    if (requestQuery.since) clauses.push('a.created_at >= ' + pushParam(params, requestQuery.since));
+    if (requestQuery.until) clauses.push('a.created_at <= ' + pushParam(params, requestQuery.until));
+    const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
+    const limit = Math.min(Number(requestQuery.limit) || 100, 500);
+    const offset = Math.max(Number(requestQuery.offset) || 0, 0);
+    const auditLogs = await query(
+      [
+        'SELECT a.id, a.area_key, a.action_key, a.entity_type, a.entity_id, a.student_id,',
+        '  a.created_at, a.metadata,',
+        '  u.display_name AS actor_name, u.email AS actor_email,',
+        '  s.student_code, s.first_name, s.last_name',
+        'FROM audit_logs a',
+        'LEFT JOIN users u ON u.id = a.actor_user_id',
+        'LEFT JOIN students s ON s.id = a.student_id',
+        where,
+        'ORDER BY a.created_at DESC',
+        'LIMIT ' + pushParam(params, limit) + ' OFFSET ' + pushParam(params, offset),
+      ].join('\n'),
+      params
+    );
+    return { auditLogs, limit, offset };
   }
 
-  async function dispatch(request) {
-    const auth = await loadAuthContext();
+  async function dispatch(request, auth) {
+    // auth may be pre-loaded by the outer fetch handler (production path) or omitted (tests/direct calls).
+    if (!auth) auth = await loadAuthContext();
     const path = request?.path ? decodeURIComponent(request.path) : '/api/bootstrap';
     const method = (request?.method || 'get').toLowerCase();
     const payload = request?.payload || {};
@@ -1674,11 +1901,20 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/settings/reference-options') return saveReferenceOption(auth, payload);
     if (method === 'post' && path === '/api/settings/reference-options/delete') return deleteReferenceOption(auth, payload);
     if (method === 'post' && path === '/api/saved-filters') return saveFilter(auth, payload);
-    if (method === 'get' && path === '/api/audit-logs') return getAuditLogsPayload(auth);
+    if (method === 'get' && path === '/api/audit-logs') return getAuditLogsPayload(auth, requestQuery);
     throw new AppError('Route not found: ' + path, 404);
   }
 
-  return { dispatch };
+  // Lightweight failed-auth audit: writes directly without requiring a loaded auth context,
+  // so it can be called from the outer fetch handler when auth fails.
+  async function writeFailedAuthAudit(email, path, reason) {
+    await query(
+      'INSERT INTO audit_logs (actor_user_id, area_key, action_key, entity_type, metadata) VALUES (NULL, $1, $2, $3, $4::jsonb)',
+      ['auth', 'denied', 'auth_failure', JSON.stringify({ email, path, reason })]
+    );
+  }
+
+  return { dispatch, loadAuthContext, writeFailedAuthAudit };
 }
 
 function compactUnique(values) {

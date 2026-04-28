@@ -136,7 +136,7 @@ test('user with no roles has no default app access', async () => {
   const api = createApi(makeEnv({ permissions: [], roleKeys: [] }), 'worker.test@alhikmah.example.org');
   await assert.rejects(
     () => api.dispatch({ path: '/api/bootstrap', method: 'get' }),
-    /Missing permission: dashboard\.view/
+    /has not been assigned a role yet/
   );
 });
 
@@ -355,8 +355,8 @@ test('safeguarding concern is automatically marked safeguarding confidentiality'
   const originalQuery = env.__query.bind(env);
   env.__query = async (sql, params) => {
     if (sql.includes('INSERT INTO concerns')) {
-      // confidentiality_level is the 7th param ($7)
-      insertedConfidentiality = params[6];
+      // confidentiality_level is the 8th param ($8) after owner_team_id was added at $4
+      insertedConfidentiality = params[7];
       return [{ id: 'c-1', student_id: STUDENT_ID, category: 'safeguarding', team_id: SAFEGUARDING_TEAM }];
     }
     return originalQuery(sql, params);
@@ -563,8 +563,9 @@ test('creating a concern stores managed incident and action_taken values', async
     method: 'post',
     payload: { studentId: STUDENT_ID, title: 'T', summary: 'S', incidentType: 'verbal', actionTaken: 'parent_contacted' },
   });
-  assert.equal(insertParams[13], 'verbal');
-  assert.equal(insertParams[14], 'parent_contacted');
+  // incident_type is $15 (index 14), action_taken is $16 (index 15) after owner_team_id added at $4
+  assert.equal(insertParams[14], 'verbal');
+  assert.equal(insertParams[15], 'parent_contacted');
 });
 
 test('direct Worker route requires bearer auth', async () => {
@@ -627,4 +628,183 @@ test('direct Worker POST rejects malformed JSON with 400', async () => {
   assert.equal(response.status, 400);
   assert.equal(body.ok, false);
   assert.match(body.error.message, /Invalid JSON request body/);
+});
+
+// ─── Ownership & team access enforcement ─────────────────────────────────────
+
+const OTHER_TEAM = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const CONCERN_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+
+// Helper: make an env where the student has records owned by OTHER_TEAM (not the user's team)
+function makeEnvWithUnrelatedStudent(extraPermissions = []) {
+  const env = makeEnv({ permissions: ['concerns.create', 'meetings.create', 'notes.create', 'actions.manage', ...extraPermissions] });
+  const originalQuery = env.__query.bind(env);
+  env.__query = async (sql, params) => {
+    // canAccessStudent: student has team associations (OTHER_TEAM) but user is in SOURCE_TEAM only
+    if (sql.includes('student_teams') && sql.includes('team_id = ANY')) {
+      return []; // user's teams are not in student's teams
+    }
+    if (sql.includes('student_teams') && sql.includes('LIMIT 1') && !sql.includes('team_id = ANY')) {
+      return [{ '?column?': 1 }]; // student does have some team associations
+    }
+    if (sql.includes('team_visibility_rules') && sql.includes('target_team_id IN')) {
+      return []; // no visibility rules connecting user's team to student's team
+    }
+    return originalQuery(sql, params);
+  };
+  return env;
+}
+
+test('user cannot create a concern for a completely unrelated student', async () => {
+  const env = makeEnvWithUnrelatedStudent();
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/concerns', method: 'post',
+      payload: { studentId: STUDENT_ID, title: 'T', summary: 'S' },
+    }),
+    /do not have access to this student/
+  );
+});
+
+test('user cannot create a meeting for a completely unrelated student', async () => {
+  const env = makeEnvWithUnrelatedStudent();
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/meetings', method: 'post',
+      payload: { studentId: STUDENT_ID, interactionType: 'meeting', title: 'T', summary: 'S', occurredAt: '2026-04-01' },
+    }),
+    /do not have access to this student/
+  );
+});
+
+test('user cannot create a note for a completely unrelated student', async () => {
+  const env = makeEnvWithUnrelatedStudent();
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/notes', method: 'post',
+      payload: { studentId: STUDENT_ID, summary: 'S', body: 'B' },
+    }),
+    /do not have access to this student/
+  );
+});
+
+test('user CAN create a concern for a student their team owns', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  const originalQuery = env.__query.bind(env);
+  let concernInserted = false;
+  env.__query = async (sql, params) => {
+    // canAccessStudent: user's team IS in student's teams (direct access)
+    if (sql.includes('student_teams') && sql.includes('team_id = ANY')) {
+      return [{ '?column?': 1 }]; // user's team found
+    }
+    if (sql.includes('INSERT INTO concerns')) {
+      concernInserted = true;
+      return [{ id: CONCERN_ID, student_id: STUDENT_ID }];
+    }
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/concerns', method: 'post',
+    payload: { studentId: STUDENT_ID, title: 'T', summary: 'S', teamIds: [SOURCE_TEAM] },
+  });
+  assert.ok(concernInserted, 'concern should have been inserted');
+});
+
+test('user cannot edit a concern owned by another team', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  const originalQuery = env.__query.bind(env);
+  env.__query = async (sql, params) => {
+    // Return a concern owned by OTHER_TEAM, submitted by a different user
+    if (sql.includes('FROM concerns WHERE id = $1')) {
+      return [{ id: CONCERN_ID, student_id: STUDENT_ID, status: 'open', owner_team_id: OTHER_TEAM, submitted_by_user_id: 'other-user-id' }];
+    }
+    // No concerns.override permission
+    if (sql.includes("permission_key = 'concerns.override'")) return [];
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/concerns/' + CONCERN_ID + '/update', method: 'post',
+      payload: { title: 'Changed title' },
+    }),
+    /do not have permission to edit this concern/
+  );
+});
+
+test('user CAN edit a concern their team owns', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  const originalQuery = env.__query.bind(env);
+  let updateCalled = false;
+  env.__query = async (sql, params) => {
+    // Concern is owned by SOURCE_TEAM (user's team)
+    if (sql.includes('FROM concerns WHERE id = $1')) {
+      return [{ id: CONCERN_ID, student_id: STUDENT_ID, status: 'open', owner_team_id: SOURCE_TEAM, submitted_by_user_id: 'other-user-id', confidentiality_level: 'summary', category: 'wellbeing', severity: 'medium', urgency: 'standard', action_note: null, behaviour_plan_active: false, referral_type: null, referral_date: null, referral_outcome: null, incident_type: null, action_taken: null }];
+    }
+    if (sql.includes('UPDATE concerns SET')) { updateCalled = true; return [{ id: CONCERN_ID }]; }
+    if (sql.includes('SELECT team_id FROM concern_teams WHERE concern_id')) return [{ team_id: SOURCE_TEAM }];
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/concerns/' + CONCERN_ID + '/update', method: 'post',
+    payload: { title: 'Updated title' },
+  });
+  assert.ok(updateCalled, 'UPDATE should have been called');
+});
+
+test('user with concerns.override permission can edit another team concern (DSL override)', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  const originalQuery = env.__query.bind(env);
+  let updateCalled = false;
+  env.__query = async (sql, params) => {
+    if (sql.includes('FROM concerns WHERE id = $1')) {
+      return [{ id: CONCERN_ID, student_id: STUDENT_ID, status: 'open', owner_team_id: OTHER_TEAM, submitted_by_user_id: 'other-user-id', confidentiality_level: 'summary', category: 'wellbeing', severity: 'medium', urgency: 'standard', action_note: null, behaviour_plan_active: false, referral_type: null, referral_date: null, referral_outcome: null, incident_type: null, action_taken: null }];
+    }
+    // Grant concerns.override
+    if (sql.includes("permission_key = 'concerns.override'")) return [{ '?column?': 1 }];
+    if (sql.includes('UPDATE concerns SET')) { updateCalled = true; return [{ id: CONCERN_ID }]; }
+    if (sql.includes('SELECT team_id FROM concern_teams WHERE concern_id')) return [{ team_id: OTHER_TEAM }];
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/concerns/' + CONCERN_ID + '/update', method: 'post',
+    payload: { title: 'DSL override edit' },
+  });
+  assert.ok(updateCalled, 'DSL override should allow UPDATE');
+});
+
+test('audit log studentId filter is blocked for unrelated student', async () => {
+  const env = makeEnvWithUnrelatedStudent(['audit.view']);
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/audit-logs', method: 'get',
+      query: { studentId: STUDENT_ID },
+    }),
+    /do not have access to this student/
+  );
+});
+
+test('owner_team_id is stored on concern creation', async () => {
+  const env = makeEnv({ permissions: ['concerns.create'] });
+  const originalQuery = env.__query.bind(env);
+  let insertParams = null;
+  env.__query = async (sql, params) => {
+    if (sql.includes('student_teams') && sql.includes('team_id = ANY')) return [{ '?column?': 1 }];
+    if (sql.includes('INSERT INTO concerns')) { insertParams = params; return [{ id: CONCERN_ID, student_id: STUDENT_ID }]; }
+    return originalQuery(sql, params);
+  };
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/concerns', method: 'post',
+    payload: { studentId: STUDENT_ID, title: 'T', summary: 'S', teamIds: [SOURCE_TEAM] },
+  });
+  // owner_team_id is the 4th param (index 3) in the INSERT
+  assert.equal(insertParams[3], SOURCE_TEAM, 'owner_team_id should be set to the first teamId');
 });
