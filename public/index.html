@@ -1998,11 +1998,11 @@ const state = {
         </div>
 
         <!-- Filter / search bar -->
-        <div class="inline-form" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)" style="flex:1;min-width:140px">
-          <input id="smFilterName" class="search-input" placeholder="Name search" style="flex:1;min-width:140px">
-          <input id="smFilterYear" class="search-input" placeholder="Year group" style="width:110px">
-          <select id="smFilterStatus" style="border-radius:8px;padding:6px 10px;border:1px solid var(--border)">
+        <div class="toolbar" style="margin-bottom:12px">
+          <input id="smFilterCode" class="search-input" placeholder="Student ID (e.g. 24*)">
+          <input id="smFilterName" class="search-input" placeholder="Name search">
+          <input id="smFilterYear" placeholder="Year group" style="width:110px">
+          <select id="smFilterStatus">
             <option value="">Any status</option>
             <option value="active">Active</option>
             <option value="monitoring">Monitoring</option>
@@ -2016,9 +2016,9 @@ const state = {
         <div id="smStudentList" style="margin-bottom:16px">${skeletonRows(6)}</div>
 
         <!-- Bulk status change -->
-        <div id="smBulkBar" class="inline-form hidden" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div id="smBulkBar" class="toolbar hidden" style="margin-bottom:16px;padding:10px 14px;background:var(--surface-mid);border-radius:10px">
           <span id="smBulkCount" class="muted small"></span>
-          <select id="smBulkStatus" style="border-radius:8px;padding:6px 10px;border:1px solid var(--border)">
+          <select id="smBulkStatus" style="width:auto">
             <option value="active">Set Active</option>
             <option value="monitoring">Set Monitoring</option>
             <option value="closed">Set Closed</option>
@@ -2146,11 +2146,9 @@ const state = {
     if (!bar) return;
     if (checked.length > 0) {
       bar.classList.remove('hidden');
-      bar.style.display = 'flex';
       if (count) count.textContent = checked.length + ' student' + (checked.length !== 1 ? 's' : '') + ' selected';
     } else {
       bar.classList.add('hidden');
-      bar.style.display = '';
     }
   }
 
