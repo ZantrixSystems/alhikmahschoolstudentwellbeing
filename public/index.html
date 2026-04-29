@@ -569,13 +569,124 @@
   }
 
   @media (max-width: 720px) {
-    body { padding: 10px; }
+    body { padding: 10px 10px 80px; }
     .masthead-brand { display: grid; gap: 10px; }
     .grid-cards, .form-grid, .filter-builder { grid-template-columns: 1fr; }
     .topbar { padding: 10px 12px; }
     .sidebar, .card, .panel { padding: 12px; }
     .topbar h2 { font-size: 20px; }
+    .sidebar { display: none; }
+    .app-shell {
+      grid-template-columns: 1fr;
+      grid-template-areas: "masthead" "main";
+    }
   }
+
+  /* ── Mobile bottom navigation ── */
+  .bottom-nav {
+    display: none;
+  }
+  @media (max-width: 720px) {
+    .bottom-nav {
+      display: flex;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 62px;
+      background: rgba(251, 249, 244, 0.96);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(208, 197, 175, 0.35);
+      box-shadow: 0 -4px 20px -6px rgba(27, 28, 25, 0.12);
+      z-index: 200;
+      padding: 0 4px;
+      align-items: stretch;
+    }
+    .bottom-nav-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      border: 0;
+      background: transparent;
+      color: var(--ink-muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 12px;
+      margin: 6px 2px;
+      transition: 140ms ease;
+      padding: 0 4px;
+    }
+    .bottom-nav-btn svg {
+      width: 22px;
+      height: 22px;
+      stroke-width: 2;
+      flex-shrink: 0;
+    }
+    .bottom-nav-btn.active {
+      color: var(--gold);
+      background: rgba(197, 165, 58, 0.10);
+    }
+    .bottom-nav-btn:active { opacity: 0.7; }
+  }
+
+  /* ── More menu overlay ── */
+  .more-menu-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+  }
+  .more-menu-overlay.open { display: block; }
+  .more-menu-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 17, 23, 0.35);
+  }
+  .more-menu-sheet {
+    position: absolute;
+    bottom: 70px;
+    right: 10px;
+    left: 10px;
+    background: rgba(251, 249, 244, 0.98);
+    backdrop-filter: blur(24px);
+    border-radius: 18px;
+    border: 1px solid rgba(208, 197, 175, 0.3);
+    box-shadow: 0 8px 40px -8px rgba(27, 28, 25, 0.22);
+    overflow: hidden;
+  }
+  .more-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 16px 20px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+    transition: 120ms ease;
+  }
+  .more-menu-item + .more-menu-item {
+    border-top: 1px solid var(--line-soft);
+  }
+  .more-menu-item svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+    color: var(--gold);
+    flex-shrink: 0;
+  }
+  .more-menu-item.danger { color: #b94040; }
+  .more-menu-item.danger svg { color: #b94040; }
 
     .login-overlay {
       display: flex;
@@ -654,6 +765,46 @@
       </main>
     </div>
   </div>
+
+  <!-- Mobile bottom navigation bar -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Main navigation">
+    <button class="bottom-nav-btn" data-nav-key="dashboard" onclick="mobileNav('dashboard')" aria-label="Dashboard">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      Dashboard
+    </button>
+    <button class="bottom-nav-btn" data-nav-key="students" onclick="mobileNav('students')" aria-label="Students">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path stroke-linecap="round" stroke-linejoin="round" d="M23 21v-2a4 4 0 0 0-3-3.87"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Students
+    </button>
+    <button class="bottom-nav-btn" data-nav-key="meetings" onclick="mobileNav('meetings')" aria-label="Calendar">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2"/><path stroke-linecap="round" d="M16 2v4M8 2v4M3 10h18"/></svg>
+      Calendar
+    </button>
+    <button class="bottom-nav-btn" id="moreBtn" onclick="toggleMoreMenu()" aria-label="More">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
+      More
+    </button>
+  </nav>
+
+  <!-- More menu sheet -->
+  <div class="more-menu-overlay" id="moreMenuOverlay">
+    <div class="more-menu-backdrop" onclick="closeMoreMenu()"></div>
+    <div class="more-menu-sheet" role="menu">
+      <button class="more-menu-item" onclick="mobileNav('settings'); closeMoreMenu();" aria-label="Settings">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+      <button class="more-menu-item" id="moreMenuProfile" onclick="closeMoreMenu();" aria-label="Profile">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path stroke-linecap="round" stroke-linejoin="round" d="M4 20c0-4 3.582-7 8-7s8 3 8 7"/></svg>
+        <span id="moreMenuProfileLabel">My Account</span>
+      </button>
+      <button class="more-menu-item danger" onclick="signOut()" aria-label="Sign out">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1"/></svg>
+        Sign Out
+      </button>
+    </div>
+  </div>
+
   <script>
     let idToken = null;
 
@@ -886,6 +1037,7 @@ const state = {
       const isActive = state.route.page === btn.dataset.navKey || (btn.dataset.navKey === 'students' && state.route.page === 'student-profile');
       btn.className = 'nav-button' + (isActive ? ' active' : '');
     });
+    syncBottomNav();
   }
 
   function setPageTitle(text) {
@@ -2710,12 +2862,66 @@ const state = {
       .then((data) => {
         state.bootstrap = data;
         document.getElementById('currentUserPill').textContent = data.currentUser.displayName + ' | ' + data.currentUser.email;
+        const profileLabel = document.getElementById('moreMenuProfileLabel');
+        if (profileLabel && data.currentUser.displayName) profileLabel.textContent = data.currentUser.displayName;
         renderRoute();
       })
       .catch(() => {
         setStatus('Error');
         showMessage('Unable to load the app. Please try again or contact support.', 'error');
       });
+  }
+
+  // ── Mobile bottom nav helpers ──
+  function mobileNav(page) {
+    updateRoute({ page, studentId: '', settingsTab: '', filter: '', q: '' });
+  }
+  window.mobileNav = mobileNav;
+
+  function toggleMoreMenu() {
+    const overlay = document.getElementById('moreMenuOverlay');
+    const isOpen = overlay.classList.contains('open');
+    if (isOpen) {
+      overlay.classList.remove('open');
+      document.getElementById('moreBtn').classList.remove('active');
+    } else {
+      overlay.classList.add('open');
+      document.getElementById('moreBtn').classList.add('active');
+    }
+  }
+  window.toggleMoreMenu = toggleMoreMenu;
+
+  function closeMoreMenu() {
+    document.getElementById('moreMenuOverlay').classList.remove('open');
+    document.getElementById('moreBtn').classList.remove('active');
+    syncBottomNav();
+  }
+  window.closeMoreMenu = closeMoreMenu;
+
+  function signOut() {
+    closeMoreMenu();
+    idToken = null;
+    if (window.google && google.accounts && google.accounts.id) {
+      google.accounts.id.disableAutoSelect();
+    }
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('loginOverlay').style.display = '';
+    if (window.google && google.accounts && google.accounts.id) {
+      google.accounts.id.prompt();
+    }
+  }
+  window.signOut = signOut;
+
+  function syncBottomNav() {
+    const bottomNav = document.getElementById('bottomNav');
+    if (!bottomNav) return;
+    const activePage = state.route.page === 'student-profile' ? 'students' : state.route.page;
+    Array.from(bottomNav.querySelectorAll('[data-nav-key]')).forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.navKey === activePage);
+    });
+    // Keep More button highlighted when Settings is active
+    const moreBtn = document.getElementById('moreBtn');
+    if (moreBtn) moreBtn.classList.toggle('active', activePage === 'settings');
   }
 
   window.addEventListener('popstate', () => { parseRoute(); renderRoute(); });
