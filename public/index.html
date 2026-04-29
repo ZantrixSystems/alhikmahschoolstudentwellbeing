@@ -914,23 +914,50 @@ const state = {
       });
   }
 
-  const ROUTE_SESSION_KEY = 'ahw_route';
-
   function parseRoute() {
-    let parsed = {};
-    try {
-      const raw = sessionStorage.getItem(ROUTE_SESSION_KEY);
-      if (raw) parsed = JSON.parse(raw);
-    } catch (e) { /* sessionStorage unavailable or corrupt */ }
+    const params = new URLSearchParams(window.location.search);
+    const parts = window.location.pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
+    let page = 'dashboard';
+    let studentId = '';
+    let settingsTab = 'users';
+    if (parts[0] === 'students') {
+      page = parts[1] ? 'student-profile' : 'students';
+      studentId = parts[1] || '';
+    } else if (parts[0] === 'meetings') {
+      page = 'meetings';
+    } else if (parts[0] === 'settings') {
+      page = 'settings';
+      settingsTab = parts[1] || 'users';
+    } else if (parts[0]) {
+      page = 'dashboard';
+    }
     state.route = {
-      page: parsed.page || 'dashboard',
-      studentId: parsed.studentId || '',
-      q: parsed.q || '',
-      filter: parsed.filter || '',
-      filterMode: parsed.filterMode || (parsed.filter ? 'advanced' : 'builder'),
-      view: parsed.view || 'calendar',
-      settingsTab: parsed.settingsTab || 'users',
+      page,
+      studentId,
+      q: params.get('q') || '',
+      filter: params.get('filter') || '',
+      filterMode: params.get('filterMode') || (params.get('filter') ? 'advanced' : 'builder'),
+      view: params.get('view') || 'calendar',
+      settingsTab,
     };
+  }
+
+  function routeToUrl(route) {
+    let path = '/';
+    if (route.page === 'students') path = '/students';
+    else if (route.page === 'student-profile' && route.studentId) path = '/students/' + encodeURIComponent(route.studentId);
+    else if (route.page === 'meetings') path = '/meetings';
+    else if (route.page === 'settings') path = '/settings/' + encodeURIComponent(route.settingsTab || 'users');
+
+    const params = new URLSearchParams();
+    if (route.page === 'students' || route.page === 'student-profile' || route.page === 'meetings') {
+      if (route.q) params.set('q', route.q);
+      if (route.filter) params.set('filter', route.filter);
+    }
+    if ((route.page === 'students' || route.page === 'student-profile') && route.filterMode && route.filterMode !== 'builder') params.set('filterMode', route.filterMode);
+    if (route.page === 'meetings' && route.view && route.view !== 'calendar') params.set('view', route.view);
+    const query = params.toString();
+    return path + (query ? '?' + query : '');
   }
 
   function updateRoute(next) {
@@ -939,7 +966,10 @@ const state = {
       if (next[key]) current[key] = next[key];
       else delete current[key];
     });
-    try { sessionStorage.setItem(ROUTE_SESSION_KEY, JSON.stringify(current)); } catch (e) {}
+    const nextUrl = routeToUrl(current);
+    if (nextUrl !== window.location.pathname + window.location.search) {
+      history.pushState({}, '', nextUrl);
+    }
     parseRoute();
     renderRoute();
   }
@@ -2072,7 +2102,7 @@ const state = {
         const btn = document.createElement('button');
         btn.dataset.settingsTab = key;
         btn.textContent = label;
-        btn.onclick = () => { state.route.settingsTab = key; state.visibilityEditMode = false; state.visibilityPending = {}; renderSettingsPage(); };
+        btn.onclick = () => { state.visibilityEditMode = false; state.visibilityPending = {}; updateRoute({ page: 'settings', settingsTab: key }); };
         tabsEl.appendChild(btn);
       });
       target.dataset.built = '1';

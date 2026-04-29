@@ -611,6 +611,51 @@ test('direct Worker route maps URL query params into dispatch query', async () =
   assert.equal(env.calls.some((call) => call.params.includes('%amina%')), true);
 });
 
+test('direct Worker serves SPA HTML for deep links', async () => {
+  const env = makeEnv();
+  for (const path of ['/', '/students', '/students/BP24004', '/settings/users']) {
+    const response = await workerApp.fetch(new Request('https://worker.test' + path), env);
+    const body = await response.text();
+
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get('content-type'), /text\/html/);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(body, '__APP_HTML_PLACEHOLDER__');
+  }
+});
+
+test('direct Worker keeps health and API routes out of SPA fallback', async () => {
+  const env = makeEnv();
+
+  const healthResponse = await workerApp.fetch(new Request('https://worker.test/health'), env);
+  const healthBody = await healthResponse.json();
+  assert.equal(healthResponse.status, 200);
+  assert.equal(healthBody.ok, true);
+  assert.equal(healthBody.service, 'al-hikmah-wellbeing-worker');
+
+  const apiResponse = await workerApp.fetch(new Request('https://worker.test/api/bootstrap'), env);
+  const apiBody = await apiResponse.json();
+  assert.equal(apiResponse.status, 401);
+  assert.equal(apiBody.ok, false);
+  assert.match(apiBody.error.message, /Missing Authorization header/);
+});
+
+test('direct Worker does not serve SPA HTML for non-GET or asset-like unknown paths', async () => {
+  const env = makeEnv();
+
+  const postResponse = await workerApp.fetch(new Request('https://worker.test/students', { method: 'POST' }), env);
+  const postBody = await postResponse.json();
+  assert.equal(postResponse.status, 404);
+  assert.equal(postBody.ok, false);
+  assert.match(postBody.error.message, /Not found/);
+
+  const assetResponse = await workerApp.fetch(new Request('https://worker.test/favicon.ico'), env);
+  const assetBody = await assetResponse.json();
+  assert.equal(assetResponse.status, 404);
+  assert.equal(assetBody.ok, false);
+  assert.match(assetBody.error.message, /Not found/);
+});
+
 test('direct Worker POST rejects malformed JSON with 400', async () => {
   const env = makeEnv();
   env.__verifyGoogleIdToken = () => 'worker.test@alhikmah.example.org';

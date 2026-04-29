@@ -65,13 +65,9 @@ export default {
       return addCors(env, origin, json({ ok: false, error: { message: 'Too many requests' } }, 429));
     }
 
-    // Serve the SPA
-    if (request.method === 'GET' && url.pathname === '/') {
-      const html = APP_HTML.replaceAll('__GOOGLE_CLIENT_ID__', env.GOOGLE_CLIENT_ID || '');
-      return new Response(html, {
-        status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders(env, origin) },
-      });
+    // Serve the SPA for browser deep links. Asset-like paths should still 404.
+    if (isSpaNavigationRequest(request, url)) {
+      return spaResponse(env, origin);
     }
 
     // API routes
@@ -144,6 +140,21 @@ function addCors(env, requestOrigin, response) {
   const r = new Response(response.body, response);
   Object.entries(corsHeaders(env, requestOrigin)).forEach(([k, v]) => r.headers.set(k, v));
   return r;
+}
+
+function isSpaNavigationRequest(request, url) {
+  if (request.method !== 'GET') return false;
+  if (url.pathname === '/health' || url.pathname.startsWith('/api/')) return false;
+  const lastSegment = url.pathname.split('/').pop() || '';
+  return !lastSegment.includes('.');
+}
+
+function spaResponse(env, requestOrigin) {
+  const html = APP_HTML.replaceAll('__GOOGLE_CLIENT_ID__', env.GOOGLE_CLIENT_ID || '');
+  return new Response(html, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...corsHeaders(env, requestOrigin) },
+  });
 }
 
 function json(body, status = 200) {
