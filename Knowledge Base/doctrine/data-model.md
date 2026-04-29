@@ -39,7 +39,7 @@ The schema uses explicit relational tables so future MIS integration can reuse s
 
 Neon remains the system of record. Browser code must not connect to Neon directly; all reads and writes go through the Worker API.
 
-Student lifecycle status (`students.current_status`) is managed from Settings / Student Management as `active` or `inactive`. The student profile casework actions do not change this field; case visibility and team radar indicators are driven by open cases and explicit radar records.
+Student records are created and maintained from Settings / Student Management using the import flow and active/inactive lifecycle controls. The general Students page is a directory and filter surface only. Student lifecycle status (`students.current_status`) is managed from Settings / Student Management as `active` or `inactive`. The student profile casework actions do not change this field; case visibility and team radar indicators are driven by open cases and explicit radar records.
 
 ## SEND Model (migration 008)
 

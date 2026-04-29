@@ -630,6 +630,28 @@ test('direct Worker POST rejects malformed JSON with 400', async () => {
   assert.match(body.error.message, /Invalid JSON request body/);
 });
 
+test('legacy direct student create and delete routes are not exposed', async () => {
+  const api = createApi(makeEnv({ permissions: ['students.manage'] }), 'worker.test@alhikmah.example.org');
+
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/students',
+      method: 'post',
+      payload: { studentCode: 'A001', firstName: 'Amina', lastName: 'Khan' },
+    }),
+    /Route not found/
+  );
+
+  await assert.rejects(
+    () => api.dispatch({
+      path: '/api/students/' + STUDENT_ID + '/delete',
+      method: 'post',
+      payload: {},
+    }),
+    /Route not found/
+  );
+});
+
 // ─── Ownership & team access enforcement ─────────────────────────────────────
 
 const OTHER_TEAM = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';

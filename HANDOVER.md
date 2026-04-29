@@ -65,7 +65,7 @@ Local migration secret:
 - Search students and apply `radar==safeguarding`.
 - Toggle Students between Builder and Advanced filter modes.
 - Confirm Dashboard, Calendar, and Settings load without large layout jumps.
-- Create a student as a caseworker/admin.
+- Create/import students from Settings / Student Management as an authorised admin user.
 - Open a profile and add a note, meeting, concern, follow-up, and radar.
 - In Settings / Student Management, verify active/inactive student lifecycle status changes.
 - Log a safeguarding concern and verify referral fields appear conditionally.

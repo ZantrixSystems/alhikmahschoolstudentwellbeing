@@ -980,35 +980,6 @@ function createApi(env, actorEmail) {
     return { students, filter: filterExpression };
   }
 
-  async function createStudent(auth, body) {
-    await assertPermission(auth, 'students.manage');
-    if (!body.firstName || !body.lastName) throw new AppError('firstName and lastName are required');
-    const code = body.studentCode || 'STU-' + Date.now();
-    // If student already exists by student_code, return their existing record
-    const existing = await queryOne('SELECT * FROM students WHERE student_code = $1 AND deleted_at IS NULL', [code]);
-    if (existing) return { student: existing };
-    const student = await queryOne(
-      [
-        'INSERT INTO students (student_code, first_name, last_name, preferred_name, year_group, tutor_group, current_status, created_by, updated_by)',
-        'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)',
-        'RETURNING *',
-      ].join('\n'),
-      [code, body.firstName, body.lastName, body.preferredName || null, body.yearGroup || null, body.tutorGroup || null, body.status || 'active', auth.userId]
-    );
-    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'create', entityType: 'student', entityId: student.id, studentId: student.id });
-    return { student };
-  }
-
-  async function deleteStudent(auth, studentId) {
-    await assertPermission(auth, 'students.delete');
-    if (!studentId) throw new AppError('studentId is required');
-    const student = await queryOne('SELECT id FROM students WHERE id = $1 AND deleted_at IS NULL', [studentId]);
-    if (!student) throw new AppError('Student not found', 404);
-    await queryOne('UPDATE students SET deleted_at = NOW(), updated_by = $1 WHERE id = $2 RETURNING id', [auth.userId, studentId]);
-    await writeAuditLog(auth, { areaKey: 'students', actionKey: 'delete', entityType: 'student', entityId: studentId, studentId });
-    return { ok: true };
-  }
-
   async function getStudentProfilePayload(auth, studentId) {
     await assertPermission(auth, 'students.view');
     const permissionKeys = await getEffectivePermissionKeys(auth);
@@ -1908,7 +1879,6 @@ function createApi(env, actorEmail) {
     if (method === 'get' && path === '/api/bootstrap') return getBootstrapPayload(auth);
     if (method === 'get' && path === '/api/dashboard') return getDashboardPayload(auth);
     if (method === 'get' && path === '/api/students') return getStudentsPayload(auth, requestQuery);
-    if (method === 'post' && path === '/api/students') return createStudent(auth, payload);
     if (method === 'get' && /^\/api\/students\/[^/]+$/.test(path)) return getStudentProfilePayload(auth, path.split('/')[3]);
     if (method === 'post' && path === '/api/concerns') return createConcern(auth, payload);
     if (method === 'post' && /^\/api\/concerns\/[^/]+\/close$/.test(path)) return closeConcern(auth, path.split('/')[3], payload);
@@ -1921,7 +1891,6 @@ function createApi(env, actorEmail) {
     if (method === 'post' && path === '/api/radar') return addRadar(auth, payload);
     if (method === 'post' && path === '/api/students/import') return importStudents(auth, payload);
     if (method === 'post' && path === '/api/students/bulk-status') return bulkUpdateStudentStatus(auth, payload);
-    if (method === 'post' && /^\/api\/students\/[^/]+\/delete$/.test(path)) return deleteStudent(auth, path.split('/')[3]);
     if (method === 'get' && path === '/api/settings/reference') return getSettingsReferencePayload(auth);
     if (method === 'post' && path === '/api/settings/users') return saveUser(auth, payload);
     if (method === 'post' && path === '/api/settings/users/delete') return deleteUser(auth, payload);
