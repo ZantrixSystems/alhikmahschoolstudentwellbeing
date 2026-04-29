@@ -3,6 +3,9 @@
 ## Product Principle
 
 The student profile is the operational centre of the interim app.
+It is a casework surface, not a student-record administration surface. Student
+creation, activation, deactivation, and deletion controls belong in Settings /
+Student Management.
 
 ## Layout
 
