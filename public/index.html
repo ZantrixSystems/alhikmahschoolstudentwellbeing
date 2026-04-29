@@ -2344,7 +2344,6 @@ const state = {
           <div class="form-grid">
             <input id="editUserEmail" class="span-2" placeholder="Email" disabled>
             <input id="editUserDisplayName" class="span-2" placeholder="Display name">
-            <select id="editUserPrimaryTeam"><option value="">No primary team</option>${teamOptions}</select>
             <select id="editUserActive"><option value="true">Active</option><option value="false">Inactive</option></select>
             <p class="eyebrow span-2" style="margin:0">Teams</p>
             <select id="editUserTeams" class="span-2" multiple size="5">${teamOptions}</select>
@@ -2556,7 +2555,7 @@ const state = {
     const deleteUserButton = document.getElementById('deleteUserButton');
     if (saveEditUserButton) saveEditUserButton.onclick = () => {
       const userId = saveEditUserButton.dataset.userId;
-      callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('editUserEmail').value, displayName: document.getElementById('editUserDisplayName').value, primaryTeamId: document.getElementById('editUserPrimaryTeam').value, isActive: document.getElementById('editUserActive').value === 'true', teamIds: selectedValues('editUserTeams'), roleIds: selectedValues('editUserRoles') } })
+      callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('editUserEmail').value, displayName: document.getElementById('editUserDisplayName').value, isActive: document.getElementById('editUserActive').value === 'true', teamIds: selectedValues('editUserTeams'), roleIds: selectedValues('editUserRoles') } })
         .then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User updated.'); });
     };
     if (deleteUserButton) deleteUserButton.onclick = () => {
@@ -2589,9 +2588,7 @@ const state = {
         const cachedRef = getCached('settings:reference');
         const userTeams = (cachedRef && cachedRef.userTeams || []).filter((ut) => ut.user_id === userId).map((ut) => ut.team_id);
         const userRoles = (cachedRef && cachedRef.userRoles || []).filter((ur) => ur.user_id === userId).map((ur) => ur.role_id);
-        const primaryTeamSel = document.getElementById('editUserPrimaryTeam');
         const user = (cachedRef && cachedRef.users || []).find((u) => u.id === userId);
-        if (user && primaryTeamSel) primaryTeamSel.value = user.primary_team_id || '';
         Array.from(document.getElementById('editUserTeams').options).forEach((option) => { option.selected = userTeams.includes(option.value); });
         Array.from(document.getElementById('editUserRoles').options).forEach((option) => { option.selected = userRoles.includes(option.value); });
         userEditPanel.classList.remove('hidden');

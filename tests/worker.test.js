@@ -73,7 +73,6 @@ function makeEnv(options = {}) {
           id: USER_ID,
           email: 'worker.test@alhikmah.example.org',
           display_name: 'Worker Test',
-          primary_team_id: null,
           is_active: true,
           role_keys: roleKeys,
           team_ids: teamIds,
@@ -96,7 +95,7 @@ function makeEnv(options = {}) {
         return teamRows.filter((team) => team.id === params[0]);
       }
       if (sql.includes('INSERT INTO users')) {
-        return [{ id: 'saved-user-id', email: params[0], display_name: params[1], primary_team_id: params[2], is_active: params[3] }];
+        return [{ id: 'saved-user-id', email: params[0], display_name: params[1], is_active: params[2] }];
       }
       if (sql.includes('FROM students s') && sql.includes('GROUP BY s.id') && sql.includes('AS flags')) {
         return profileRows;
@@ -426,7 +425,6 @@ test('settings user save replaces teams and roles in one request', async () => {
     payload: {
       email: 'new.user@example.org',
       displayName: 'New User',
-      primaryTeamId: SOURCE_TEAM,
       teamIds: [TARGET_TEAM],
       roleIds: [roleId],
       isActive: true,

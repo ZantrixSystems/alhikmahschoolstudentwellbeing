@@ -314,7 +314,7 @@ function createApi(env, actorEmail) {
     await assertDomainAllowed(actorEmail);
     const row = await queryOne(
       [
-        'SELECT u.id, u.email, u.display_name, u.primary_team_id, u.is_active,',
+        'SELECT u.id, u.email, u.display_name, u.is_active,',
         '  COALESCE(ARRAY_AGG(DISTINCT r.role_key) FILTER (WHERE r.role_key IS NOT NULL), ARRAY[]::text[]) AS role_keys,',
         '  COALESCE(ARRAY_AGG(DISTINCT ut.team_id) FILTER (WHERE ut.team_id IS NOT NULL), ARRAY[]::uuid[]) AS team_ids',
         'FROM users u',
@@ -332,7 +332,7 @@ function createApi(env, actorEmail) {
     if (!roleKeys.includes('admin') && roleKeys.length === 0) {
       throw new AppError('Your account exists but has not been assigned a role yet. Please contact your administrator.', 403);
     }
-    const teamIds = compactUnique([row.primary_team_id].concat(row.team_ids || []));
+    const teamIds = compactUnique(row.team_ids || []);
     return {
       userId: row.id,
       email: row.email,
@@ -1607,7 +1607,7 @@ function createApi(env, actorEmail) {
   async function getSettingsReferencePayload(auth) {
     await assertPermission(auth, 'settings.view');
     const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, referenceOptions] = await Promise.all([
-      query('SELECT id, email, display_name, primary_team_id, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
+      query('SELECT id, email, display_name, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
       query('SELECT id, role_key, name, description, is_system, is_editable FROM roles WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT id, permission_key, area_key, action_key, description FROM permissions ORDER BY permission_key'),
       query('SELECT id, team_key, name, description, accent_color, is_active FROM teams WHERE deleted_at IS NULL ORDER BY name'),
@@ -1735,8 +1735,8 @@ function createApi(env, actorEmail) {
     await assertPermission(auth, 'settings.users.manage');
     if (!body.email || !body.displayName) throw new AppError('email and displayName are required');
     const roleIds = Array.isArray(body.roleIds) ? compactUnique(body.roleIds) : null;
-    const teamIds = Array.isArray(body.teamIds) ? compactUnique((body.primaryTeamId ? [body.primaryTeamId] : []).concat(body.teamIds)) : null;
-    const user = await queryOne('INSERT INTO users (email, display_name, primary_team_id, is_active, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, primary_team_id = EXCLUDED.primary_team_id, is_active = EXCLUDED.is_active, deleted_at = NULL, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [String(body.email).toLowerCase(), body.displayName, body.primaryTeamId || null, body.isActive !== false, auth.userId]);
+    const teamIds = Array.isArray(body.teamIds) ? compactUnique(body.teamIds) : null;
+    const user = await queryOne('INSERT INTO users (email, display_name, is_active, created_by, updated_by) VALUES ($1, $2, $3, $4, $4) ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, is_active = EXCLUDED.is_active, deleted_at = NULL, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [String(body.email).toLowerCase(), body.displayName, body.isActive !== false, auth.userId]);
     if (teamIds) {
       await query('DELETE FROM user_teams WHERE user_id = $1', [user.id]);
       if (teamIds.length) {
@@ -1773,7 +1773,7 @@ function createApi(env, actorEmail) {
     if ((existing.role_keys || []).includes('admin')) throw new AppError('Admin accounts cannot be deleted', 400);
     await query('DELETE FROM user_roles WHERE user_id = $1', [body.userId]);
     await query('DELETE FROM user_teams WHERE user_id = $1', [body.userId]);
-    const user = await queryOne('UPDATE users SET is_active = FALSE, primary_team_id = NULL, deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id, email, display_name', [auth.userId, body.userId]);
+    const user = await queryOne('UPDATE users SET is_active = FALSE, deleted_at = NOW(), updated_at = NOW(), updated_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id, email, display_name', [auth.userId, body.userId]);
     await writeAuditLog(auth, { areaKey: 'settings.users', actionKey: 'delete', entityType: 'user', entityId: body.userId, metadata: { email: existing.email } });
     return { user };
   }
