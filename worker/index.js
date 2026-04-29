@@ -1617,7 +1617,7 @@ function createApi(env, actorEmail) {
 
   async function getSettingsReferencePayload(auth) {
     await assertPermission(auth, 'settings.view');
-    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, referenceOptions] = await Promise.all([
+    const [users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, rolePermissions, referenceOptions] = await Promise.all([
       query('SELECT id, email, display_name, is_active FROM users WHERE deleted_at IS NULL ORDER BY display_name'),
       query('SELECT id, role_key, name, description, is_system, is_editable FROM roles WHERE deleted_at IS NULL ORDER BY name'),
       query('SELECT id, permission_key, area_key, action_key, description FROM permissions ORDER BY permission_key'),
@@ -1626,9 +1626,10 @@ function createApi(env, actorEmail) {
       query('SELECT id, area_key, name, filter_expression, is_shared FROM saved_filters WHERE deleted_at IS NULL ORDER BY area_key, name'),
       query('SELECT ur.user_id, ur.role_id, u.display_name AS user_name, u.email AS user_email, r.role_key, r.name AS role_name FROM user_roles ur JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL ORDER BY u.display_name, r.name'),
       query('SELECT ut.user_id, ut.team_id, t.name AS team_name FROM user_teams ut JOIN teams t ON t.id = ut.team_id AND t.deleted_at IS NULL ORDER BY t.name'),
+      query('SELECT rp.role_id, p.permission_key, p.description FROM role_permissions rp JOIN roles r ON r.id = rp.role_id AND r.deleted_at IS NULL JOIN permissions p ON p.id = rp.permission_id ORDER BY r.name, p.permission_key'),
       getReferenceOptions(null, null, false),
     ]);
-    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, referenceOptions };
+    return { users, roles, permissions, teams, visibilityRules, savedFilters, userRoles, userTeams, rolePermissions, referenceOptions };
   }
 
   function assertManagedReferenceField(areaKey, fieldKey) {
@@ -1792,13 +1793,26 @@ function createApi(env, actorEmail) {
   async function saveRole(auth, body) {
     await assertPermission(auth, 'settings.roles.manage');
     if (!body.roleKey || !body.name) throw new AppError('roleKey and name are required');
-    if (body.roleKey === 'admin') throw new AppError('The built-in admin role is immutable', 400);
-    const role = await queryOne('INSERT INTO roles (role_key, name, description, is_system, is_editable, created_by, updated_by) VALUES ($1, $2, $3, FALSE, TRUE, $4, $4) ON CONFLICT (role_key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [body.roleKey, body.name, body.description || '', auth.userId]);
+    const roleKey = String(body.roleKey).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!roleKey) throw new AppError('roleKey must contain letters or numbers');
+    if (roleKey === 'admin') throw new AppError('The built-in admin role is immutable', 400);
+    let role;
+    if (body.roleId) {
+      const existing = await queryOne('SELECT id, role_key FROM roles WHERE id = $1 AND deleted_at IS NULL', [body.roleId]);
+      if (!existing) throw new AppError('Role not found', 404);
+      if (existing.role_key === 'admin') throw new AppError('The built-in admin role is immutable', 400);
+      role = await queryOne(
+        'UPDATE roles SET name = $1, description = $2, is_editable = TRUE, updated_at = NOW(), updated_by = $3 WHERE id = $4 AND deleted_at IS NULL RETURNING *',
+        [body.name, body.description || '', auth.userId, body.roleId]
+      );
+    } else {
+      role = await queryOne('INSERT INTO roles (role_key, name, description, is_system, is_editable, created_by, updated_by) VALUES ($1, $2, $3, FALSE, TRUE, $4, $4) ON CONFLICT (role_key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, is_editable = TRUE, updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING *', [roleKey, body.name, body.description || '', auth.userId]);
+    }
     await query('DELETE FROM role_permissions WHERE role_id = $1', [role.id]);
     if ((body.permissionKeys || []).length) {
       await query('INSERT INTO role_permissions (role_id, permission_id, created_by) SELECT $1, p.id, $2 FROM permissions p WHERE p.permission_key = ANY($3::text[])', [role.id, auth.userId, body.permissionKeys]);
     }
-    await writeAuditLog(auth, { areaKey: 'settings.roles', actionKey: 'upsert', entityType: 'role', entityId: role.id, metadata: { roleKey: body.roleKey } });
+    await writeAuditLog(auth, { areaKey: 'settings.roles', actionKey: 'upsert', entityType: 'role', entityId: role.id, metadata: { roleKey: role.role_key || roleKey } });
     return { role };
   }
 

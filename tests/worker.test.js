@@ -22,6 +22,8 @@ function makeEnv(options = {}) {
   const teamRows = options.teamRows || [];
   const userTeamRows = options.userTeamRows || [];
   const userRowsById = options.userRowsById || [];
+  const roleRowsById = options.roleRowsById || [];
+  const rolePermissionRows = options.rolePermissionRows || [];
   const referenceOptions = options.referenceOptions || [
     { id: 'ref-incident-verbal', area_key: 'concerns', field_key: 'incident_type', option_key: 'verbal', label: 'Verbal incident', sort_order: 10, is_active: true, is_system: true },
     { id: 'ref-action-parent', area_key: 'concerns', field_key: 'action_taken', option_key: 'parent_contacted', label: 'Parent/carer contacted', sort_order: 10, is_active: true, is_system: true },
@@ -87,6 +89,27 @@ function makeEnv(options = {}) {
       if (sql.includes('p.permission_key = $2')) {
         return permissions.includes(params[1]) || roleKeys.includes('admin') ? [{ '?column?': 1 }] : [];
       }
+      if (sql.includes('SELECT id, role_key, name, description, is_system, is_editable FROM roles')) {
+        return roleRowsById.length ? roleRowsById : [
+          { id: 'role-caseworker', role_key: 'caseworker', name: 'Caseworker', description: 'Casework', is_system: true, is_editable: true },
+          { id: 'role-admin', role_key: 'admin', name: 'Admin', description: 'Admin', is_system: true, is_editable: false },
+        ];
+      }
+      if (sql.includes('FROM role_permissions rp')) {
+        return rolePermissionRows;
+      }
+      if (sql.includes('SELECT id, role_key FROM roles WHERE id = $1')) {
+        return roleRowsById.filter((role) => role.id === params[0]);
+      }
+      if (sql.includes('UPDATE roles SET name = $1')) {
+        const existing = roleRowsById.find((role) => role.id === params[3]) || { id: params[3], role_key: 'caseworker' };
+        return [{ ...existing, name: params[0], description: params[1], is_editable: true }];
+      }
+      if (sql.includes('INSERT INTO roles')) {
+        return [{ id: 'saved-role-id', role_key: params[0], name: params[1], description: params[2], is_system: false, is_editable: true }];
+      }
+      if (sql.includes('DELETE FROM role_permissions')) return [];
+      if (sql.includes('INSERT INTO role_permissions')) return [];
       if (sql.includes('SELECT team_key FROM teams WHERE id = ANY')) {
         const ids = Array.isArray(params[0]) ? params[0] : [];
         return teamRows.filter((team) => ids.includes(team.id));
@@ -148,6 +171,39 @@ test('admin role cannot be mutated even with settings permission', async () => {
     () => api.dispatch({ path: '/api/settings/roles', method: 'post', payload: { roleKey: 'admin', name: 'Admin' } }),
     /built-in admin role is immutable/
   );
+});
+
+test('admin role cannot be mutated by role id', async () => {
+  const api = createApi(makeEnv({
+    permissions: ['settings.roles.manage'],
+    roleRowsById: [{ id: 'role-admin', role_key: 'admin', name: 'Admin', description: 'Admin', is_system: true, is_editable: false }],
+  }), 'worker.test@alhikmah.example.org');
+  await assert.rejects(
+    () => api.dispatch({ path: '/api/settings/roles', method: 'post', payload: { roleId: 'role-admin', roleKey: 'admin', name: 'Admin changed' } }),
+    /built-in admin role is immutable/
+  );
+});
+
+test('settings role save updates non-admin role and replaces permissions', async () => {
+  const env = makeEnv({
+    permissions: ['settings.roles.manage'],
+    roleRowsById: [{ id: 'role-caseworker', role_key: 'caseworker', name: 'Caseworker', description: 'Casework', is_system: true, is_editable: true }],
+  });
+  const api = createApi(env, 'worker.test@alhikmah.example.org');
+  await api.dispatch({
+    path: '/api/settings/roles',
+    method: 'post',
+    payload: {
+      roleId: 'role-caseworker',
+      roleKey: 'caseworker',
+      name: 'Caseworker Plus',
+      description: 'Updated role',
+      permissionKeys: ['students.view', 'concerns.review'],
+    },
+  });
+  assert.ok(env.calls.some((call) => call.sql.includes('UPDATE roles SET name = $1') && call.params[3] === 'role-caseworker'));
+  assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM role_permissions') && call.params[0] === 'role-caseworker'));
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO role_permissions') && call.params[2].includes('students.view') && call.params[2].includes('concerns.review')));
 });
 
 test('team visibility summary redacts meeting detail on student profile', async () => {
@@ -413,6 +469,15 @@ test('settings reference includes managed dropdown options', async () => {
   const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
   assert.equal(data.referenceOptions.length, 1);
   assert.equal(data.referenceOptions[0].field_key, 'incident_type');
+});
+
+test('settings reference includes role permission assignments', async () => {
+  const api = createApi(makeEnv({
+    permissions: ['settings.view'],
+    rolePermissionRows: [{ role_id: 'role-caseworker', permission_key: 'students.view', description: 'View students' }],
+  }), 'worker.test@alhikmah.example.org');
+  const data = await api.dispatch({ path: '/api/settings/reference', method: 'get' });
+  assert.deepEqual(data.rolePermissions, [{ role_id: 'role-caseworker', permission_key: 'students.view', description: 'View students' }]);
 });
 
 test('settings user save replaces teams and roles in one request', async () => {

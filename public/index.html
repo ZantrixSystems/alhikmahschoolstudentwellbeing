@@ -2419,10 +2419,26 @@ const state = {
   }
 
   function renderRolesSettings(data) {
+    const rolePermissions = data.rolePermissions || [];
+    const permissionOptions = (data.permissions || []).map((p) => `<option value="${escapeHtml(p.permission_key)}">${escapeHtml(p.description || friendlyLabel(p.permission_key))}</option>`).join('');
+    const rows = (data.roles || []).map((r) => {
+      const assigned = rolePermissions.filter((rp) => rp.role_id === r.id).map((rp) => `<span class="chip">${escapeHtml(rp.description || friendlyLabel(rp.permission_key))}</span>`).join('') || '<span class="muted small">No permissions</span>';
+      const canEdit = r.role_key !== 'admin';
+      return `<tr>
+        <td><strong>${escapeHtml(r.name)}</strong><br><span class="muted small">${escapeHtml(r.role_key)}</span></td>
+        <td>${escapeHtml(r.description || '')}</td>
+        <td><div class="chip-row">${assigned}</div></td>
+        <td style="white-space:nowrap">${canEdit ? `<button class="text-button" data-edit-role
+          data-id="${escapeHtml(r.id)}"
+          data-key="${escapeHtml(r.role_key)}"
+          data-name="${escapeHtml(r.name)}"
+          data-description="${escapeHtml(r.description || '')}">Edit</button>` : '<span class="muted small">Locked</span>'}</td>
+      </tr>`;
+    }).join('');
     return `
       <div class="two-col">
-        <article class="panel compact-panel"><h3 class="section-title">Roles</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Role</th><th>Description</th></tr></thead><tbody>${(data.roles || []).map((r) => `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.description || '')}</td></tr>`).join('')}</tbody></table></div></article>
-        <article class="panel compact-panel"><h3 class="section-title">Custom Role</h3><div class="form-grid"><input id="roleKey" placeholder="Short code"><input id="roleName" placeholder="Role name"><textarea id="roleDescription" class="span-2" rows="2" placeholder="Description"></textarea><select id="rolePermissions" class="span-2" multiple size="8">${(data.permissions || []).map((p) => `<option value="${p.permission_key}">${escapeHtml(p.description || friendlyLabel(p.permission_key))}</option>`).join('')}</select><button class="button span-2" id="saveRoleButton">Save role</button></div></article>
+        <article class="panel compact-panel"><h3 class="section-title">Roles</h3><div class="table-scroll"><table class="data-table dense-table"><thead><tr><th>Role</th><th>Description</th><th>Permissions</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></article>
+        <article class="panel compact-panel"><h3 class="section-title" id="roleFormTitle">Add Role</h3><div class="form-grid"><input id="roleKey" placeholder="Short code"><input id="roleName" placeholder="Role name"><textarea id="roleDescription" class="span-2" rows="2" placeholder="Description"></textarea><select id="rolePermissions" class="span-2" multiple size="8">${permissionOptions}</select><input type="hidden" id="roleEditId" value=""><button class="button" id="saveRoleButton">Save role</button><button class="button secondary hidden" id="cancelRoleEditButton">Cancel edit</button></div></article>
       </div>`;
   }
 
@@ -2628,8 +2644,46 @@ const state = {
     if (assignRoleButton) assignRoleButton.onclick = () => callServer({ path: '/api/settings/user-roles', method: 'post', payload: { userId: document.getElementById('urUserId').value, roleId: document.getElementById('urRoleId').value, action: 'assign' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'user-roles' }); });
     const removeRoleButton = document.getElementById('removeRoleButton');
     if (removeRoleButton) removeRoleButton.onclick = () => callServer({ path: '/api/settings/user-roles', method: 'post', payload: { userId: document.getElementById('urUserId').value, roleId: document.getElementById('urRoleId').value, action: 'remove' } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'user-roles' }); });
+    Array.from(document.querySelectorAll('[data-edit-role]')).forEach((btn) => {
+      btn.onclick = () => {
+        const roleId = btn.dataset.id;
+        const roleKey = document.getElementById('roleKey');
+        const cachedRef = getCached('settings:reference');
+        const permissionKeys = (cachedRef && cachedRef.rolePermissions || []).filter((rp) => rp.role_id === roleId).map((rp) => rp.permission_key);
+        document.getElementById('roleFormTitle').textContent = 'Edit Role';
+        document.getElementById('roleEditId').value = roleId;
+        roleKey.value = btn.dataset.key;
+        roleKey.disabled = true;
+        document.getElementById('roleName').value = btn.dataset.name;
+        document.getElementById('roleDescription').value = btn.dataset.description || '';
+        Array.from(document.getElementById('rolePermissions').options).forEach((option) => { option.selected = permissionKeys.includes(option.value); });
+        document.getElementById('cancelRoleEditButton').classList.remove('hidden');
+        document.getElementById('roleName').focus();
+      };
+    });
+    const cancelRoleEditButton = document.getElementById('cancelRoleEditButton');
+    if (cancelRoleEditButton) cancelRoleEditButton.onclick = () => {
+      document.getElementById('roleFormTitle').textContent = 'Add Role';
+      document.getElementById('roleEditId').value = '';
+      document.getElementById('roleKey').value = '';
+      document.getElementById('roleKey').disabled = false;
+      document.getElementById('roleName').value = '';
+      document.getElementById('roleDescription').value = '';
+      Array.from(document.getElementById('rolePermissions').options).forEach((option) => { option.selected = false; });
+      cancelRoleEditButton.classList.add('hidden');
+    };
     const saveRoleButton = document.getElementById('saveRoleButton');
-    if (saveRoleButton) saveRoleButton.onclick = () => callServer({ path: '/api/settings/roles', method: 'post', payload: { roleKey: document.getElementById('roleKey').value, name: document.getElementById('roleName').value, description: document.getElementById('roleDescription').value, permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value) } }).then(() => { bustCache('settings:reference'); showMessage('Role saved.'); });
+    if (saveRoleButton) saveRoleButton.onclick = () => {
+      const payload = {
+        roleId: document.getElementById('roleEditId').value,
+        roleKey: document.getElementById('roleKey').value,
+        name: document.getElementById('roleName').value,
+        description: document.getElementById('roleDescription').value,
+        permissionKeys: Array.from(document.getElementById('rolePermissions').selectedOptions).map((o) => o.value),
+      };
+      callServer({ path: '/api/settings/roles', method: 'post', payload })
+        .then(() => { bustCache('settings:reference'); renderSettingsPage(); showMessage('Role saved.'); });
+    };
     const saveTeamButton = document.getElementById('saveTeamButton');
     if (saveTeamButton) saveTeamButton.onclick = () => callServer({ path: '/api/settings/teams', method: 'post', payload: { teamKey: document.getElementById('teamKey').value, name: document.getElementById('teamName').value, description: document.getElementById('teamDescription').value, accentColor: document.getElementById('teamAccentColor').value, isActive: document.getElementById('teamActive').value === 'true' } }).then(() => { bustCache('settings:reference'); showMessage('Team saved.'); });
     // Visibility matrix — Edit/Save/Cancel

@@ -6,9 +6,13 @@
   - Immutable
   - Full access to settings, users, permissions, and records
 
-## Custom Roles
+## Editable Roles
 
-Custom roles are stored in the database and managed in-app. Roles can include permissions such as:
+Operational roles are stored in the database and managed in-app through Settings > Roles.
+The seeded `caseworker` and `concern_logger` roles are editable, as are custom roles.
+The fixed `admin` role remains immutable.
+
+Editable roles can include permissions such as:
 
 - `dashboard.view`
 - `students.view`

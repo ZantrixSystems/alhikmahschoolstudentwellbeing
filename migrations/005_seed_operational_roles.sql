@@ -1,7 +1,7 @@
 INSERT INTO roles (role_key, name, description, is_system, is_editable)
 VALUES
-  ('caseworker', 'Caseworker', 'Operational wellbeing practitioner with day-to-day casework access', TRUE, FALSE),
-  ('concern_logger', 'Concern Logger', 'General staff member able to submit concerns and view students', TRUE, FALSE)
+  ('caseworker', 'Caseworker', 'Operational wellbeing practitioner with day-to-day casework access', TRUE, TRUE),
+  ('concern_logger', 'Concern Logger', 'General staff member able to submit concerns and view students', TRUE, TRUE)
 ON CONFLICT (role_key) DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)
