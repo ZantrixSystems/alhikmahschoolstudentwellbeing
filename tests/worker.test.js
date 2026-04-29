@@ -431,7 +431,7 @@ test('settings user save replaces teams and roles in one request', async () => {
     },
   });
   assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_teams') && call.params[0] === 'saved-user-id'));
-  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO user_teams') && call.params[1].includes(SOURCE_TEAM) && call.params[1].includes(TARGET_TEAM)));
+  assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO user_teams') && call.params[1].length === 1 && call.params[1].includes(TARGET_TEAM)));
   assert.ok(env.calls.some((call) => call.sql.includes('DELETE FROM user_roles') && call.params[0] === 'saved-user-id'));
   assert.ok(env.calls.some((call) => call.sql.includes('INSERT INTO user_roles') && call.params[1].includes(roleId)));
 });

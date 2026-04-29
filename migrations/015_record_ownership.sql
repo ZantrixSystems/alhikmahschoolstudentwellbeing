@@ -1,7 +1,7 @@
 -- Migration 015: Add owner_team_id to record tables for edit ownership enforcement.
 --
 -- The owner_team_id is set at creation time to the first team associated with the
--- record (or the submitter's primary team as fallback). It identifies which team
+-- record. It identifies which team
 -- "owns" the record for edit-permission purposes. Cross-team visibility and
 -- collaboration are unchanged — this only controls who can EDIT a record.
 --

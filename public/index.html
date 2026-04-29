@@ -2326,7 +2326,6 @@ const state = {
           <div class="form-grid">
             <input id="userEmail" placeholder="user@school.org">
             <input id="userDisplayName" placeholder="Display name">
-            <select id="userPrimaryTeam"><option value="">No primary team</option>${teamOptions}</select>
             <select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select>
             <p class="eyebrow span-2" style="margin:0">Teams</p>
             <select id="userTeams" class="span-2" multiple size="4">${teamOptions}</select>
@@ -2545,7 +2544,7 @@ const state = {
     if (cancelUserButton) cancelUserButton.onclick = () => { userForm.classList.add('hidden'); addUserToggle.classList.remove('hidden'); };
     const selectedValues = (id) => Array.from((document.getElementById(id) || { selectedOptions: [] }).selectedOptions).map((option) => option.value);
     const saveUserButton = document.getElementById('saveUserButton');
-    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, primaryTeamId: document.getElementById('userPrimaryTeam').value, isActive: document.getElementById('userActive').value === 'true', teamIds: selectedValues('userTeams'), roleIds: selectedValues('userRoles') } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User saved.'); });
+    if (saveUserButton) saveUserButton.onclick = () => callServer({ path: '/api/settings/users', method: 'post', payload: { email: document.getElementById('userEmail').value, displayName: document.getElementById('userDisplayName').value, isActive: document.getElementById('userActive').value === 'true', teamIds: selectedValues('userTeams'), roleIds: selectedValues('userRoles') } }).then(() => { bustCache('settings:reference'); updateRoute({ page: 'settings', settingsTab: 'users' }); showMessage('User saved.'); });
 
     // Edit existing user
     const userEditPanel = document.getElementById('userEditPanel');
